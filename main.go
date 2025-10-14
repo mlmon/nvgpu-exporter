@@ -8,12 +8,27 @@ import (
 	"net/http"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+const (
+	namespace = "nvgpu"
+	version   = "0.1.0"
 )
 
 var (
 	addr  = flag.String("addr", ":9400", "HTTP server address")
 	debug = flag.Bool("debug", false, "Enable debug output")
+
+	exporterInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "exporter_info",
+			Help:      "Information about the nvgpu-exporter.",
+		},
+		[]string{"version", "driver_version", "nvml_version", "cuda_version"},
+	)
 )
 
 func listDevices() {
@@ -44,6 +59,35 @@ func listDevices() {
 	}
 }
 
+func initMetrics() error {
+	// Get driver version
+	driverVersion, ret := nvml.SystemGetDriverVersion()
+	if ret != nvml.SUCCESS {
+		return fmt.Errorf("failed to get driver version: %v", nvml.ErrorString(ret))
+	}
+
+	// Get NVML version
+	nvmlVersion, ret := nvml.SystemGetNVMLVersion()
+	if ret != nvml.SUCCESS {
+		return fmt.Errorf("failed to get NVML version: %v", nvml.ErrorString(ret))
+	}
+
+	// Get CUDA version
+	cudaVersion, ret := nvml.SystemGetCudaDriverVersion()
+	if ret != nvml.SUCCESS {
+		return fmt.Errorf("failed to get CUDA version: %v", nvml.ErrorString(ret))
+	}
+	cudaVersionStr := fmt.Sprintf("%d.%d", cudaVersion/1000, (cudaVersion%1000)/10)
+
+	// Set the exporter info metric
+	exporterInfo.WithLabelValues(version, driverVersion, nvmlVersion, cudaVersionStr).Set(1)
+
+	// Register the metric
+	prometheus.MustRegister(exporterInfo)
+
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -57,6 +101,10 @@ func main() {
 			log.Fatalf("Failed to shutdown NVML: %v", nvml.ErrorString(ret))
 		}
 	}()
+
+	if err := initMetrics(); err != nil {
+		log.Fatalf("Failed to initialize metrics: %v", err)
+	}
 
 	if *debug {
 		listDevices()
