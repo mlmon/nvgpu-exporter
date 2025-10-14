@@ -1,0 +1,9 @@
+# Binaries
+nvgpu-exporter
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
