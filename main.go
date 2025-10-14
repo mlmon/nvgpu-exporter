@@ -31,6 +31,16 @@ var (
 	)
 )
 
+type GpuInfo struct {
+	Brand               string
+	Serial              string
+	OemInforomVersion   string
+	EccInforomVersion   string
+	PowerInforomVersion string
+	VbiosVersion        string
+	InforomImageVersion string
+}
+
 func listDevices() {
 	count, ret := nvml.DeviceGetCount()
 	if !errors.Is(ret, nvml.SUCCESS) {
@@ -62,19 +72,19 @@ func listDevices() {
 func initMetrics() error {
 	// Get driver version
 	driverVersion, ret := nvml.SystemGetDriverVersion()
-	if ret != nvml.SUCCESS {
+	if !errors.Is(ret, nvml.SUCCESS) {
 		return fmt.Errorf("failed to get driver version: %v", nvml.ErrorString(ret))
 	}
 
 	// Get NVML version
 	nvmlVersion, ret := nvml.SystemGetNVMLVersion()
-	if ret != nvml.SUCCESS {
+	if !errors.Is(ret, nvml.SUCCESS) {
 		return fmt.Errorf("failed to get NVML version: %v", nvml.ErrorString(ret))
 	}
 
 	// Get CUDA version
 	cudaVersion, ret := nvml.SystemGetCudaDriverVersion()
-	if ret != nvml.SUCCESS {
+	if !errors.Is(ret, nvml.SUCCESS) {
 		return fmt.Errorf("failed to get CUDA version: %v", nvml.ErrorString(ret))
 	}
 	cudaVersionStr := fmt.Sprintf("%d.%d", cudaVersion/1000, (cudaVersion%1000)/10)
@@ -92,12 +102,12 @@ func main() {
 	flag.Parse()
 
 	ret := nvml.Init()
-	if ret != nvml.SUCCESS {
+	if !errors.Is(ret, nvml.SUCCESS) {
 		log.Fatalf("Failed to initialize NVML: %v", nvml.ErrorString(ret))
 	}
 	defer func() {
 		ret := nvml.Shutdown()
-		if ret != nvml.SUCCESS {
+		if !errors.Is(ret, nvml.SUCCESS) {
 			log.Fatalf("Failed to shutdown NVML: %v", nvml.ErrorString(ret))
 		}
 	}()
