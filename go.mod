@@ -3,7 +3,7 @@ module github.com/mlmon/nvgpu-exporter
 go 1.25.1
 
 require (
-	github.com/NVIDIA/go-nvml v0.13.0-1
+	github.com/NVIDIA/go-nvml v0.12.9-0
 	github.com/prometheus/client_golang v1.23.2
 )
 

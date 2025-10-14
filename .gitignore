@@ -1,5 +1,6 @@
 # Binaries
 nvgpu-exporter
+dist/
 
 # IDE
 .idea/
