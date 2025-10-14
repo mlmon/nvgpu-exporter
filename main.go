@@ -41,6 +41,64 @@ type GpuInfo struct {
 	InforomImageVersion string
 }
 
+func getGpuInfo(index int) (*GpuInfo, error) {
+	device, ret := nvml.DeviceGetHandleByIndex(index)
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get device at index %d: %v", index, nvml.ErrorString(ret))
+	}
+
+	info := &GpuInfo{}
+
+	// Get brand
+	brand, ret := device.GetBrand()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get brand: %v", nvml.ErrorString(ret))
+	}
+	info.Brand = fmt.Sprintf("%d", brand)
+
+	// Get serial
+	serial, ret := device.GetSerial()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get serial: %v", nvml.ErrorString(ret))
+	}
+	info.Serial = serial
+
+	// Get VBIOS version
+	vbios, ret := device.GetVbiosVersion()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get VBIOS version: %v", nvml.ErrorString(ret))
+	}
+	info.VbiosVersion = vbios
+
+	// Get InfoROM versions
+	oemVersion, ret := device.GetInforomVersion(nvml.INFOROM_OEM)
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get OEM InfoROM version: %v", nvml.ErrorString(ret))
+	}
+	info.OemInforomVersion = oemVersion
+
+	eccVersion, ret := device.GetInforomVersion(nvml.INFOROM_ECC)
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get ECC InfoROM version: %v", nvml.ErrorString(ret))
+	}
+	info.EccInforomVersion = eccVersion
+
+	powerVersion, ret := device.GetInforomVersion(nvml.INFOROM_POWER)
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get Power InfoROM version: %v", nvml.ErrorString(ret))
+	}
+	info.PowerInforomVersion = powerVersion
+
+	// Get InfoROM image version
+	imageVersion, ret := device.GetInforomImageVersion()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get InfoROM image version: %v", nvml.ErrorString(ret))
+	}
+	info.InforomImageVersion = imageVersion
+
+	return info, nil
+}
+
 func listDevices() {
 	count, ret := nvml.DeviceGetCount()
 	if !errors.Is(ret, nvml.SUCCESS) {
