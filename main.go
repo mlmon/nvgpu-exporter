@@ -29,9 +29,20 @@ var (
 		},
 		[]string{"version", "driver_version", "nvml_version", "cuda_version"},
 	)
+
+	gpuInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "gpu_info",
+			Help:      "GPU device information.",
+		},
+		[]string{"uuid", "name", "brand", "serial", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
+	)
 )
 
 type GpuInfo struct {
+	UUID                string
+	Name                string
 	Brand               string
 	Serial              string
 	OemInforomVersion   string
@@ -48,6 +59,20 @@ func getGpuInfo(index int) (*GpuInfo, error) {
 	}
 
 	info := &GpuInfo{}
+
+	// Get UUID
+	uuid, ret := device.GetUUID()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get UUID: %v", nvml.ErrorString(ret))
+	}
+	info.UUID = uuid
+
+	// Get name
+	name, ret := device.GetName()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get name: %v", nvml.ErrorString(ret))
+	}
+	info.Name = name
 
 	// Get brand
 	brand, ret := device.GetBrand()
@@ -150,8 +175,38 @@ func initMetrics() error {
 	// Set the exporter info metric
 	exporterInfo.WithLabelValues(version, driverVersion, nvmlVersion, cudaVersionStr).Set(1)
 
-	// Register the metric
+	// Register the exporter info metric
 	prometheus.MustRegister(exporterInfo)
+
+	// Get device count and populate GPU info metrics
+	count, ret := nvml.DeviceGetCount()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
+	}
+
+	for i := 0; i < count; i++ {
+		// Get GPU info
+		info, err := getGpuInfo(i)
+		if err != nil {
+			return fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
+		}
+
+		// Set GPU info metric
+		gpuInfo.WithLabelValues(
+			info.UUID,
+			info.Name,
+			info.Brand,
+			info.Serial,
+			info.VbiosVersion,
+			info.OemInforomVersion,
+			info.EccInforomVersion,
+			info.PowerInforomVersion,
+			info.InforomImageVersion,
+		).Set(1)
+	}
+
+	// Register the GPU info metric
+	prometheus.MustRegister(gpuInfo)
 
 	return nil
 }
