@@ -41,7 +41,7 @@ jobs:
     - name: Build and push with ko
       env:
         KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
-        GOFLAGS: "-ldflags=-s -w -X main.version=${{ steps.extract_tag.outputs.tag }} -X main.commit=${{ github.sha }}"
+        GOFLAGS: "-ldflags='-s -w -X main.version=${{ steps.extract_tag.outputs.tag }} -X main.commit=${{ github.sha }}'"
       run: |
         ko build . \
           --bare \
