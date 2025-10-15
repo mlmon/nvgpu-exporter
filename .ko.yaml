@@ -1,1 +1,9 @@
 defaultBaseImage: nvidia/cuda:13.0.1-base-ubuntu22.04
+builds:
+  - id: nvgpu-exporter
+    main: .
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{.Env.VERSION}}
+      - -X main.commit={{.Env.COMMIT}}
