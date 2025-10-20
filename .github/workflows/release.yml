@@ -24,6 +24,16 @@ jobs:
         go-version: '1.25.1'
         cache: true
 
+    - name: Cache cross-compilation tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/bin/aarch64-linux-gnu-*
+          /usr/bin/x86_64-linux-gnu-*
+          /usr/aarch64-linux-gnu
+          /usr/x86_64-linux-gnu
+        key: ${{ runner.os }}-cross-compile-${{ hashFiles('.github/workflows/release.yml') }}
+
     - name: Install cross-compilation dependencies
       run: |
         sudo apt-get update
