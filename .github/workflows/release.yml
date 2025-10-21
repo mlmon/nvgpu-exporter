@@ -52,7 +52,7 @@ jobs:
         key: ${{ runner.os }}-cross-compile-${{ hashFiles('.github/workflows/release.yml') }}
 
     - name: Install cross compiler (if needed)
-      if: matrix.cc == 'aarch64-linux-gnu-gcc'
+      if: matrix.cc == 'aarch64-linux-gnu-gcc' && steps.cache-compiler.outputs.cache-hit != 'true'
       run: |
         sudo apt-get update
         sudo apt-get install -y gcc-aarch64-linux-gnu
