@@ -85,8 +85,6 @@ jobs:
     - name: Build and push with ko
       env:
         CGO_ENABLED: "1"
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
         CC: ${{ matrix.cc }}
         VERSION: ${{ steps.extract_tag.outputs.tag }}
       run: |
