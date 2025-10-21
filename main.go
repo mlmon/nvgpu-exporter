@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,8 +19,8 @@ const (
 )
 
 var (
-	addr  = flag.String("addr", ":9400", "HTTP server address")
-	debug = flag.Bool("debug", false, "Enable debug output")
+	addr               = flag.String("addr", ":9400", "HTTP server address")
+	collectionInterval = flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
 
 	exporterInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -38,6 +39,15 @@ var (
 		},
 		[]string{"uuid", "name", "brand", "serial", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
 	)
+
+	fabricHealth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "fabric_health",
+			Help:      "GPU fabric health status (1 = healthy/false, 0 = unhealthy/true).",
+		},
+		[]string{"uuid", "health_field"},
+	)
 )
 
 type GpuInfo struct {
@@ -52,12 +62,7 @@ type GpuInfo struct {
 	InforomImageVersion string
 }
 
-func getGpuInfo(index int) (*GpuInfo, error) {
-	device, ret := nvml.DeviceGetHandleByIndex(index)
-	if !errors.Is(ret, nvml.SUCCESS) {
-		return nil, fmt.Errorf("failed to get device at index %d: %v", index, nvml.ErrorString(ret))
-	}
-
+func getGpuVersionDetail(device nvml.Device) (*GpuInfo, error) {
 	info := &GpuInfo{}
 
 	// Get UUID
@@ -152,23 +157,23 @@ func listDevices() {
 	}
 }
 
-func initMetrics() error {
+func initMetrics() ([]nvml.Device, error) {
 	// Get driver version
 	driverVersion, ret := nvml.SystemGetDriverVersion()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return fmt.Errorf("failed to get driver version: %v", nvml.ErrorString(ret))
+		return nil, fmt.Errorf("failed to get driver version: %v", nvml.ErrorString(ret))
 	}
 
 	// Get NVML version
 	nvmlVersion, ret := nvml.SystemGetNVMLVersion()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return fmt.Errorf("failed to get NVML version: %v", nvml.ErrorString(ret))
+		return nil, fmt.Errorf("failed to get NVML version: %v", nvml.ErrorString(ret))
 	}
 
 	// Get CUDA version
 	cudaVersion, ret := nvml.SystemGetCudaDriverVersion()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return fmt.Errorf("failed to get CUDA version: %v", nvml.ErrorString(ret))
+		return nil, fmt.Errorf("failed to get CUDA version: %v", nvml.ErrorString(ret))
 	}
 	cudaVersionStr := fmt.Sprintf("%d.%d", cudaVersion/1000, (cudaVersion%1000)/10)
 
@@ -181,14 +186,21 @@ func initMetrics() error {
 	// Get device count and populate GPU info metrics
 	count, ret := nvml.DeviceGetCount()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
+		return nil, fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
 	}
 
+	var devices []nvml.Device
+
 	for i := 0; i < count; i++ {
-		// Get GPU info
-		info, err := getGpuInfo(i)
+		device, ret := nvml.DeviceGetHandleByIndex(i)
+		if !errors.Is(ret, nvml.SUCCESS) {
+			return nil, fmt.Errorf("failed to get device at index %d: %v", i, nvml.ErrorString(ret))
+		}
+		devices = append(devices, device)
+
+		info, err := getGpuVersionDetail(device)
 		if err != nil {
-			return fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
+			return nil, fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
 		}
 
 		// Set GPU info metric
@@ -208,7 +220,76 @@ func initMetrics() error {
 	// Register the GPU info metric
 	prometheus.MustRegister(gpuInfo)
 
-	return nil
+	return devices, nil
+}
+
+// collectFabricHealth collects GPU fabric health metrics for all devices
+func collectFabricHealth(devices []nvml.Device) {
+	for _, device := range devices {
+		uuid, ret := device.GetUUID()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get UUID for device: %v", nvml.ErrorString(ret))
+			continue
+		}
+
+		// Get GPU fabric info - try V2 which includes health mask
+		fabricInfo, ret := device.GetGpuFabricInfoV().V2()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get fabric info V2 for device %s: %v", uuid, nvml.ErrorString(ret))
+			continue
+		}
+
+		// Extract health status bits from the health mask
+		// Based on NVML documentation, the health mask contains various health indicators
+		// We'll extract the common health fields using bit operations
+
+		// Degraded bandwidth (bits 0-1)
+		degradedBw := (fabricInfo.HealthMask >> 0) & 0x3
+		fabricHealth.WithLabelValues(uuid, "degraded_bandwidth").Set(flagToGauge(degradedBw != 1))
+
+		// Route recovery (bits 2-3)
+		routeRecovery := (fabricInfo.HealthMask >> 2) & 0x3
+		fabricHealth.WithLabelValues(uuid, "route_recovery").Set(flagToGauge(routeRecovery != 1))
+
+		// Route unhealthy (bits 4-5)
+		routeUnhealthy := (fabricInfo.HealthMask >> 4) & 0x3
+		fabricHealth.WithLabelValues(uuid, "route_unhealthy").Set(flagToGauge(routeUnhealthy != 1))
+
+		// Access timeout recovery (bits 6-7)
+		accessTimeoutRecovery := (fabricInfo.HealthMask >> 6) & 0x3
+		fabricHealth.WithLabelValues(uuid, "access_timeout_recovery").Set(flagToGauge(accessTimeoutRecovery != 1))
+	}
+}
+
+// flagToGauge converts a boolean to a float64 for Prometheus gauges
+// true (healthy/false) = 1.0, false (unhealthy/true) = 0.0
+func flagToGauge(b bool) float64 {
+	if b {
+		return 1.0
+	}
+	return 0.0
+}
+
+// startFabricHealthCollector starts a goroutine that periodically collects fabric health metrics
+func startFabricHealthCollector(devices []nvml.Device, interval time.Duration) {
+	// Register the fabric health metric
+	prometheus.MustRegister(fabricHealth)
+
+	// Start the collection goroutine
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Collect immediately on start
+		collectFabricHealth(devices)
+
+		// Then collect periodically
+		for range ticker.C {
+			collectFabricHealth(devices)
+		}
+	}()
+
+	log.Printf("Started fabric health collector with interval: %v", interval)
 }
 
 func main() {
@@ -225,13 +306,15 @@ func main() {
 		}
 	}()
 
-	if err := initMetrics(); err != nil {
+	devices, err := initMetrics()
+	if err != nil {
 		log.Fatalf("Failed to initialize metrics: %v", err)
 	}
 
-	if *debug {
-		listDevices()
-	}
+	// Start fabric health collector
+	startFabricHealthCollector(devices, *collectionInterval)
+
+	listDevices()
 
 	http.Handle("/metrics", promhttp.Handler())
 
