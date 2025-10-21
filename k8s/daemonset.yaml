@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvgpu-exporter
+  namespace: monitoring
+  labels:
+    app: nvgpu-exporter
+spec:
+  selector:
+    matchLabels:
+      app: nvgpu-exporter
+  template:
+    metadata:
+      labels:
+        app: nvgpu-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+      nodeSelector:
+        cloud.google.com/gke-accelerator: exists
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: nvgpu-exporter
+        image: ghcr.io/mlmon/nvgpu-exporter:latest
+        imagePullPolicy: Always
+        ports:
+        - name: metrics
+          containerPort: 9400
+          protocol: TCP
+        args:
+        - --addr=:9400
+        - --collection-interval=60s
+        env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+        volumeMounts:
+        - name: nvidia-lib
+          mountPath: /usr/local/nvidia/lib64
+          readOnly: true
+        - name: nvidia-dev
+          mountPath: /dev
+          readOnly: true
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 100m
+          limits:
+            memory: 128Mi
+            cpu: 200m
+      volumes:
+      - name: nvidia-lib
+        hostPath:
+          path: /home/kubernetes/bin/nvidia/lib64
+          type: Directory
+      - name: nvidia-dev
+        hostPath:
+          path: /dev
+          type: Directory
