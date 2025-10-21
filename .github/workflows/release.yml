@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+env:
+  KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
+  COMMIT: ${{ github.sha }}
+
 permissions:
   contents: write
   packages: write
@@ -12,6 +16,19 @@ permissions:
 jobs:
   release-containers:
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            cc: gcc                 # native gcc is fine for amd64 on ubuntu-latest
+            platform: linux/amd64
+          - goos: linux
+            goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            platform: linux/arm64
 
     steps:
     - uses: actions/checkout@v4
@@ -34,16 +51,22 @@ jobs:
           /usr/x86_64-linux-gnu
         key: ${{ runner.os }}-cross-compile-${{ hashFiles('.github/workflows/release.yml') }}
 
-    - name: Install cross-compilation dependencies
+    - name: Install cross compiler (if needed)
+      if: matrix.cc == 'aarch64-linux-gnu-gcc'
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu \
-          gcc-x86-64-linux-gnu \
-          g++-x86-64-linux-gnu \
-          libc6-dev-arm64-cross \
-          libc6-dev-amd64-cross
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+
+#    - name: Install cross-compilation dependencies
+#      run: |
+#        sudo apt-get update
+#        sudo apt-get install -y \
+#          gcc-aarch64-linux-gnu \
+#          g++-aarch64-linux-gnu \
+#          gcc-x86-64-linux-gnu \
+#          g++-x86-64-linux-gnu \
+#          libc6-dev-arm64-cross \
+#          libc6-dev-amd64-cross
 
     - name: Set up ko
       uses: ko-build/setup-ko@v0.9
@@ -61,10 +84,16 @@ jobs:
 
     - name: Build and push with ko
       env:
-        KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
+        CGO_ENABLED: "1"
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CC: ${{ matrix.cc }}
         VERSION: ${{ steps.extract_tag.outputs.tag }}
-        COMMIT: ${{ github.sha }}
       run: |
+        # Verify toolchain in logs
+        $CC --version || true
+        go env
+        echo "Building for $GOOS/$GOARCH with CC=$CC"
         ko build . \
           --platform=linux/amd64,linux/arm64 \
           --base-import-paths \
