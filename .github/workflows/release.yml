@@ -42,6 +42,7 @@ jobs:
         cache: true
 
     - name: Cache cross-compilation tools
+      id: cache-compiler
       uses: actions/cache@v4
       with:
         path: |
