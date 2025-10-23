@@ -1,66 +1,70 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: nvgpu-exporter
+  name: nvml-access
   namespace: monitoring
   labels:
-    app: nvgpu-exporter
+    app: nvml-access
 spec:
   selector:
     matchLabels:
-      app: nvgpu-exporter
+      app: nvml-access
+  updateStrategy:
+    type: RollingUpdate
   template:
     metadata:
       labels:
-        app: nvgpu-exporter
+        app: nvml-access
     spec:
-      hostNetwork: true
-      hostPID: true
       nodeSelector:
-        cloud.google.com/gke-accelerator: exists
+        nvidia.com/gpu.present: "true"
       tolerations:
-      - key: nvidia.com/gpu
-        operator: Exists
-        effect: NoSchedule
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoExecute"
+        - key: kubernetes.io/arch
+          operator: Exists
+          effect: NoSchedule
+      runtimeClassName: nvidia
+      hostPID: false
       containers:
-      - name: nvgpu-exporter
-        image: ghcr.io/mlmon/nvgpu-exporter:latest
-        imagePullPolicy: Always
-        ports:
-        - name: metrics
-          containerPort: 9400
-          protocol: TCP
-        args:
-        - --addr=:9400
-        - --collection-interval=60s
-        env:
-        - name: LD_LIBRARY_PATH
-          value: /usr/local/nvidia/lib64
-        securityContext:
-          privileged: true
-          capabilities:
-            add:
-            - SYS_ADMIN
-        volumeMounts:
-        - name: nvidia-lib
-          mountPath: /usr/local/nvidia/lib64
-          readOnly: true
-        - name: nvidia-dev
-          mountPath: /dev
-          readOnly: true
-        resources:
-          requests:
-            memory: 64Mi
-            cpu: 100m
-          limits:
-            memory: 128Mi
-            cpu: 200m
+        - name: nvml
+          image: ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:v0.0.15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "all"
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+            capabilities:
+              add: ["SYS_ADMIN"]
+          volumeMounts:
+            - name: dev
+              mountPath: /dev
+            # Sysfs paths used by the driver stack
+            - name: sys
+              mountPath: /sys
+              readOnly: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
       volumes:
-      - name: nvidia-lib
-        hostPath:
-          path: /home/kubernetes/bin/nvidia/lib64
-          type: Directory
-      - name: nvidia-dev
-        hostPath:
-          path: /dev
-          type: Directory
+        - name: dev
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: sys
+          hostPath:
+            path: /sys
+            type: Directory
