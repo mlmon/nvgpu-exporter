@@ -114,7 +114,9 @@ func getGpuVersionDetail(device nvml.Device) (*GpuInfo, error) {
 	info.EccInforomVersion = eccVersion
 
 	powerVersion, ret := device.GetInforomVersion(nvml.INFOROM_POWER)
-	if !errors.Is(ret, nvml.SUCCESS) {
+	if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+		log.Println("Power InfoROM not supported on this GPU; skipping power metrics")
+	} else if !errors.Is(ret, nvml.SUCCESS) {
 		return nil, fmt.Errorf("failed to get Power InfoROM version: %v", nvml.ErrorString(ret))
 	}
 	info.PowerInforomVersion = powerVersion
