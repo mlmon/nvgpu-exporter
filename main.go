@@ -37,7 +37,7 @@ var (
 			Name:      "gpu_info",
 			Help:      "GPU device information.",
 		},
-		[]string{"uuid", "name", "brand", "serial", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
+		[]string{"uuid", "pci_bus_id", "name", "brand", "serial", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
 	)
 
 	fabricHealth = prometheus.NewGaugeVec(
@@ -46,12 +46,13 @@ var (
 			Name:      "fabric_health",
 			Help:      "GPU fabric health status (1 = healthy/false, 0 = unhealthy/true).",
 		},
-		[]string{"uuid", "health_field"},
+		[]string{"uuid", "pci_bus_id", "health_field"},
 	)
 )
 
 type GpuInfo struct {
 	UUID                string
+	PciBusId            string
 	Name                string
 	Brand               string
 	Serial              string
@@ -71,6 +72,13 @@ func getGpuVersionDetail(device nvml.Device) (*GpuInfo, error) {
 		return nil, fmt.Errorf("failed to get UUID: %v", nvml.ErrorString(ret))
 	}
 	info.UUID = uuid
+
+	// Get PCI bus ID
+	pciInfo, ret := device.GetPciInfo()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get PCI info: %v", nvml.ErrorString(ret))
+	}
+	info.PciBusId = string(pciInfo.BusIdLegacy[:])
 
 	// Get name
 	name, ret := device.GetName()
@@ -208,6 +216,7 @@ func initMetrics() ([]nvml.Device, error) {
 		// Set GPU info metric
 		gpuInfo.WithLabelValues(
 			info.UUID,
+			info.PciBusId,
 			info.Name,
 			info.Brand,
 			info.Serial,
@@ -234,6 +243,14 @@ func collectFabricHealth(devices []nvml.Device) {
 			continue
 		}
 
+		// Get PCI bus ID
+		pciInfo, ret := device.GetPciInfo()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get PCI info for device %s: %v", uuid, nvml.ErrorString(ret))
+			continue
+		}
+		pciBusId := string(pciInfo.BusIdLegacy[:])
+
 		// Get GPU fabric info - try V2 which includes health mask
 		fabricInfo, ret := device.GetGpuFabricInfoV().V2()
 		if !errors.Is(ret, nvml.SUCCESS) {
@@ -247,19 +264,19 @@ func collectFabricHealth(devices []nvml.Device) {
 
 		// Degraded bandwidth (bits 0-1)
 		degradedBw := (fabricInfo.HealthMask >> 0) & 0x3
-		fabricHealth.WithLabelValues(uuid, "degraded_bandwidth").Set(flagToGauge(degradedBw != 1))
+		fabricHealth.WithLabelValues(uuid, pciBusId, "degraded_bandwidth").Set(flagToGauge(degradedBw != 1))
 
 		// Route recovery (bits 2-3)
 		routeRecovery := (fabricInfo.HealthMask >> 2) & 0x3
-		fabricHealth.WithLabelValues(uuid, "route_recovery").Set(flagToGauge(routeRecovery != 1))
+		fabricHealth.WithLabelValues(uuid, pciBusId, "route_recovery").Set(flagToGauge(routeRecovery != 1))
 
 		// Route unhealthy (bits 4-5)
 		routeUnhealthy := (fabricInfo.HealthMask >> 4) & 0x3
-		fabricHealth.WithLabelValues(uuid, "route_unhealthy").Set(flagToGauge(routeUnhealthy != 1))
+		fabricHealth.WithLabelValues(uuid, pciBusId, "route_unhealthy").Set(flagToGauge(routeUnhealthy != 1))
 
 		// Access timeout recovery (bits 6-7)
 		accessTimeoutRecovery := (fabricInfo.HealthMask >> 6) & 0x3
-		fabricHealth.WithLabelValues(uuid, "access_timeout_recovery").Set(flagToGauge(accessTimeoutRecovery != 1))
+		fabricHealth.WithLabelValues(uuid, pciBusId, "access_timeout_recovery").Set(flagToGauge(accessTimeoutRecovery != 1))
 	}
 }
 
