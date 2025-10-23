@@ -32,7 +32,7 @@ spec:
       hostPID: false
       containers:
         - name: nvml
-          image: ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:v0.0.15
+          image: ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: NVIDIA_VISIBLE_DEVICES
