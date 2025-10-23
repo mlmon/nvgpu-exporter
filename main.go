@@ -297,6 +297,8 @@ func startFabricHealthCollector(devices []nvml.Device, interval time.Duration) {
 func main() {
 	flag.Parse()
 
+	log.Printf("Starting fabric health collector %v\n", version)
+	
 	ret := nvml.Init()
 	if !errors.Is(ret, nvml.SUCCESS) {
 		log.Fatalf("Failed to initialize NVML: %v", nvml.ErrorString(ret))
