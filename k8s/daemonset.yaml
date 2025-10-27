@@ -1,20 +1,33 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: nvml-access
+  name: nvgpu-exporter
   namespace: monitoring
   labels:
-    app: nvml-access
+    app: nvgpu-exporter
+    app.kubernetes.io/name: nvgpu-exporter
+    app.kubernetes.io/instance: nvgpu-exporter
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/part-of: monitoring
+    app.kubernetes.io/managed-by: kubectl
 spec:
   selector:
     matchLabels:
-      app: nvml-access
+      app: nvgpu-exporter
+      app.kubernetes.io/name: nvgpu-exporter
+      app.kubernetes.io/instance: nvgpu-exporter
   updateStrategy:
     type: RollingUpdate
   template:
     metadata:
       labels:
-        app: nvml-access
+        app: nvgpu-exporter
+        app.kubernetes.io/name: nvgpu-exporter
+        app.kubernetes.io/instance: nvgpu-exporter
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/component: exporter
+        app.kubernetes.io/part-of: monitoring
     spec:
       nodeSelector:
         nvidia.com/gpu.present: "true"
