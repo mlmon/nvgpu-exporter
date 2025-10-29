@@ -37,7 +37,7 @@ var (
 			Name:      "gpu_info",
 			Help:      "GPU device information.",
 		},
-		[]string{"uuid", "pci_bus_id", "name", "brand", "serial", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
+		[]string{"uuid", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
 	)
 
 	fabricHealth = prometheus.NewGaugeVec(
@@ -48,6 +48,15 @@ var (
 		},
 		[]string{"uuid", "pci_bus_id", "health_field"},
 	)
+
+	nvlinkErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "nvlink_errors_total",
+			Help:      "Total NVLink errors by type.",
+		},
+		[]string{"uuid", "pci_bus_id", "link", "error_type"},
+	)
 )
 
 type GpuInfo struct {
@@ -56,6 +65,7 @@ type GpuInfo struct {
 	Name                string
 	Brand               string
 	Serial              string
+	BoardId             string
 	OemInforomVersion   string
 	EccInforomVersion   string
 	PowerInforomVersion string
@@ -100,6 +110,16 @@ func getGpuVersionDetail(device nvml.Device) (*GpuInfo, error) {
 		return nil, fmt.Errorf("failed to get serial: %v", nvml.ErrorString(ret))
 	}
 	info.Serial = serial
+
+	// Get board ID
+	boardId, ret := device.GetBoardId()
+	if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+		info.BoardId = "unknown"
+	} else if !errors.Is(ret, nvml.SUCCESS) {
+		return nil, fmt.Errorf("failed to get board ID: %v", nvml.ErrorString(ret))
+	} else {
+		info.BoardId = fmt.Sprintf("%d", boardId)
+	}
 
 	// Get VBIOS version
 	vbios, ret := device.GetVbiosVersion()
@@ -220,6 +240,7 @@ func initMetrics() ([]nvml.Device, error) {
 			info.Name,
 			info.Brand,
 			info.Serial,
+			info.BoardId,
 			info.VbiosVersion,
 			info.OemInforomVersion,
 			info.EccInforomVersion,
@@ -232,6 +253,66 @@ func initMetrics() ([]nvml.Device, error) {
 	prometheus.MustRegister(gpuInfo)
 
 	return devices, nil
+}
+
+// collectNVLinkErrors collects NVLink error counters for all devices
+func collectNVLinkErrors(devices []nvml.Device) {
+	// NVML NVLink error counter types
+	errorCounters := []struct {
+		counter nvml.NvLinkErrorCounter
+		name    string
+	}{
+		{nvml.NVLINK_ERROR_DL_REPLAY, "dl_replay"},
+		{nvml.NVLINK_ERROR_DL_RECOVERY, "dl_recovery"},
+		{nvml.NVLINK_ERROR_DL_CRC_FLIT, "dl_crc_flit"},
+		{nvml.NVLINK_ERROR_DL_CRC_DATA, "dl_crc_data"},
+		{nvml.NVLINK_ERROR_DL_ECC_DATA, "dl_ecc_data"},
+	}
+
+	for _, device := range devices {
+		uuid, ret := device.GetUUID()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get UUID for device: %v", nvml.ErrorString(ret))
+			continue
+		}
+
+		// Get PCI bus ID
+		pciInfo, ret := device.GetPciInfo()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get PCI info for device %s: %v", uuid, nvml.ErrorString(ret))
+			continue
+		}
+		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
+
+		// Get the maximum number of NVLink links
+		maxLinks, ret := device.GetMaxPcieLinkGeneration()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			// If we can't get max links, try up to 18 (common max for Hopper)
+			maxLinks = 18
+		}
+
+		// Iterate through each NVLink
+		for link := 0; link < int(maxLinks); link++ {
+			// Check if link is active
+			state, ret := device.GetNvLinkState(link)
+			if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
+				continue
+			}
+
+			// Collect error counters for each type
+			for _, errCounter := range errorCounters {
+				count, ret := device.GetNvLinkErrorCounter(link, errCounter.counter)
+				if errors.Is(ret, nvml.SUCCESS) {
+					nvlinkErrors.WithLabelValues(
+						uuid,
+						pciBusId,
+						fmt.Sprintf("%d", link),
+						errCounter.name,
+					).Add(float64(count))
+				}
+			}
+		}
+	}
 }
 
 // collectFabricHealth collects GPU fabric health metrics for all devices
@@ -305,10 +386,11 @@ func flagToGauge(b bool) float64 {
 	return 0.0
 }
 
-// startFabricHealthCollector starts a goroutine that periodically collects fabric health metrics
+// startFabricHealthCollector starts a goroutine that periodically collects fabric health and NVLink error metrics
 func startFabricHealthCollector(devices []nvml.Device, interval time.Duration) {
-	// Register the fabric health metric
+	// Register the metrics
 	prometheus.MustRegister(fabricHealth)
+	prometheus.MustRegister(nvlinkErrors)
 
 	// Start the collection goroutine
 	go func() {
@@ -317,14 +399,16 @@ func startFabricHealthCollector(devices []nvml.Device, interval time.Duration) {
 
 		// Collect immediately on start
 		collectFabricHealth(devices)
+		collectNVLinkErrors(devices)
 
 		// Then collect periodically
 		for range ticker.C {
 			collectFabricHealth(devices)
+			collectNVLinkErrors(devices)
 		}
 	}()
 
-	log.Printf("Started fabric health collector with interval: %v", interval)
+	log.Printf("Started fabric health and NVLink error collector with interval: %v", interval)
 }
 
 func main() {
