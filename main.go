@@ -50,8 +50,8 @@ var (
 		[]string{"uuid", "pci_bus_id", "health_field"},
 	)
 
-	nvlinkErrors = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
+	nvlinkErrors = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "nvlink_errors_total",
 			Help:      "Total NVLink errors by type.",
@@ -303,14 +303,16 @@ func collectNVLinkErrors(devices []nvml.Device) {
 			// Collect error counters for each type
 			for _, errCounter := range errorCounters {
 				count, ret := device.GetNvLinkErrorCounter(link, errCounter.counter)
-				if errors.Is(ret, nvml.SUCCESS) {
-					nvlinkErrors.WithLabelValues(
-						uuid,
-						pciBusId,
-						fmt.Sprintf("%d", link),
-						errCounter.name,
-					).Add(float64(count))
+				if !errors.Is(ret, nvml.SUCCESS) {
+					continue
 				}
+
+				nvlinkErrors.WithLabelValues(
+					uuid,
+					pciBusId,
+					fmt.Sprintf("%d", link),
+					errCounter.name,
+				).Set(float64(count))
 			}
 		}
 	}
