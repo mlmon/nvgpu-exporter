@@ -15,10 +15,11 @@ import (
 
 const (
 	namespace = "nvgpu"
-	version   = "0.1.0"
 )
 
 var (
+	commit             = "unknown"
+	version            = "0.1.0"
 	addr               = flag.String("addr", ":9400", "HTTP server address")
 	collectionInterval = flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
 
@@ -208,7 +209,7 @@ func initMetrics() ([]nvml.Device, error) {
 	cudaVersionStr := fmt.Sprintf("%d.%d", cudaVersion/1000, (cudaVersion%1000)/10)
 
 	// Set the exporter info metric
-	exporterInfo.WithLabelValues(version, driverVersion, nvmlVersion, cudaVersionStr).Set(1)
+	exporterInfo.WithLabelValues(version+"-"+commit, driverVersion, nvmlVersion, cudaVersionStr).Set(1)
 
 	// Register the exporter info metric
 	prometheus.MustRegister(exporterInfo)
@@ -414,8 +415,8 @@ func startFabricHealthCollector(devices []nvml.Device, interval time.Duration) {
 func main() {
 	flag.Parse()
 
-	log.Printf("Starting fabric health collector %v\n", version)
-	
+	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
+
 	ret := nvml.Init()
 	if !errors.Is(ret, nvml.SUCCESS) {
 		log.Fatalf("Failed to initialize NVML: %v", nvml.ErrorString(ret))

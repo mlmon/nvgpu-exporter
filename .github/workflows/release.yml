@@ -72,11 +72,20 @@ jobs:
       id: extract_tag
       run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+    - name: Extract short SHA
+      id: extract_sha
+      run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Extract version (strip v prefix)
+      id: extract_version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
     - name: Build and push with ko
       env:
         CGO_ENABLED: "1"
         CC: ${{ matrix.cc }}
-        VERSION: ${{ steps.extract_tag.outputs.tag }}
+        VERSION: ${{ steps.extract_version.outputs.version }}
+        COMMIT: ${{ steps.extract_sha.outputs.short_sha }}
       run: |
         # Verify toolchain in logs
         $CC --version || true
@@ -85,7 +94,7 @@ jobs:
         ko build . \
           --platform=${{ matrix.platform }} \
           --base-import-paths \
-          --tags=${{ steps.extract_tag.outputs.tag }},latest \
+          --tags=${{ steps.extract_tag.outputs.tag }},${{ steps.extract_sha.outputs.short_sha }},latest \
           --image-label=org.opencontainers.image.source=https://github.com/${{ github.repository }} \
-          --image-label=org.opencontainers.image.version=${{ steps.extract_tag.outputs.tag }} \
+          --image-label=org.opencontainers.image.version=${{ steps.extract_version.outputs.version }} \
           --image-label=org.opencontainers.image.revision=${{ github.sha }}
