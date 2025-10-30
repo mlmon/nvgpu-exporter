@@ -40,15 +40,6 @@ var (
 		},
 		[]string{"uuid", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
 	)
-
-	fabricHealth = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Name:      "fabric_health",
-			Help:      "GPU fabric health status (1 = healthy/false, 0 = unhealthy/true).",
-		},
-		[]string{"uuid", "pci_bus_id", "health_field"},
-	)
 )
 
 type GpuInfo struct {
@@ -247,79 +238,8 @@ func initMetrics() ([]nvml.Device, error) {
 	return devices, nil
 }
 
-// collectFabricHealth collects GPU fabric health metrics for all devices
-func collectFabricHealth(devices []nvml.Device) {
-	for _, device := range devices {
-		uuid, ret := device.GetUUID()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get UUID for device: %v", nvml.ErrorString(ret))
-			continue
-		}
-
-		// Get PCI bus ID
-		pciInfo, ret := device.GetPciInfo()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get PCI info for device %s: %v", uuid, nvml.ErrorString(ret))
-			continue
-		}
-		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
-
-		// Get GPU fabric info - try V2 which includes health mask
-		fabricInfo, ret := device.GetGpuFabricInfoV().V2()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get fabric info V2 for device %s: %v", uuid, nvml.ErrorString(ret))
-			continue
-		}
-
-		// Extract health status bits from the health mask
-		// Based on NVML documentation, the health mask contains various health indicators
-		// We'll extract the common health fields using bit operations
-
-		// Degraded bandwidth (bits 0-1)
-		degradedBw := (fabricInfo.HealthMask >> 0) & 0x3
-		fabricHealth.WithLabelValues(uuid, pciBusId, "degraded_bandwidth").Set(flagToGauge(degradedBw != 1))
-
-		// Route recovery (bits 2-3)
-		routeRecovery := (fabricInfo.HealthMask >> 2) & 0x3
-		fabricHealth.WithLabelValues(uuid, pciBusId, "route_recovery").Set(flagToGauge(routeRecovery != 1))
-
-		// Route unhealthy (bits 4-5)
-		routeUnhealthy := (fabricInfo.HealthMask >> 4) & 0x3
-		fabricHealth.WithLabelValues(uuid, pciBusId, "route_unhealthy").Set(flagToGauge(routeUnhealthy != 1))
-
-		// Access timeout recovery (bits 6-7)
-		accessTimeoutRecovery := (fabricInfo.HealthMask >> 6) & 0x3
-		fabricHealth.WithLabelValues(uuid, pciBusId, "access_timeout_recovery").Set(flagToGauge(accessTimeoutRecovery != 1))
-	}
-}
-
-// pciBusIdToString converts a PCI bus ID byte array to a human-readable string
-// Standard PCI address format is: DDDD:BB:DD.F (e.g., 0000:00:1e.0)
-// This is typically 12-13 characters long
-func pciBusIdToString(busId [16]uint8) string {
-	// Standard PCI address is domain:bus:device.function (12-13 chars)
-	// Find the end by looking for common PCI address length
-	str := string(busId[:])
-	// Find the last digit or period in the expected PCI format
-	for i := 12; i < len(busId) && i < 14; i++ {
-		if busId[i] == 0 || busId[i] < 32 || busId[i] > 126 {
-			return str[:i]
-		}
-	}
-	return str[:13]
-}
-
-// flagToGauge converts a boolean to a float64 for Prometheus gauges
-// true (healthy/false) = 1.0, false (unhealthy/true) = 0.0
-func flagToGauge(b bool) float64 {
-	if b {
-		return 1.0
-	}
-	return 0.0
-}
-
-// startFabricHealthCollector starts a goroutine that periodically collects fabric health and NVLink error metrics
-func startFabricHealthCollector(devices []nvml.Device, interval time.Duration) {
+// startCollectors starts a goroutine that periodically collects fabric health and NVLink error metrics
+func startCollectors(devices []nvml.Device, interval time.Duration) {
 	// Register the metrics
 	prometheus.MustRegister(fabricHealth)
 	prometheus.MustRegister(nvlinkErrors)
@@ -365,7 +285,7 @@ func main() {
 	}
 
 	// Start fabric health collector
-	startFabricHealthCollector(devices, *collectionInterval)
+	startCollectors(devices, *collectionInterval)
 
 	listDevices()
 
