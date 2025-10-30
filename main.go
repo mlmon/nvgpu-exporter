@@ -165,7 +165,7 @@ func listDevices() {
 		log.Fatalf("Failed to get device count: %v", nvml.ErrorString(ret))
 	}
 
-	fmt.Printf("Found %d GPU device(s)\n", count)
+	log.Printf("Found %d GPU device(s)\n", count)
 
 	for i := 0; i < count; i++ {
 		device, ret := nvml.DeviceGetHandleByIndex(i)
@@ -183,7 +183,7 @@ func listDevices() {
 			log.Fatalf("Failed to get device UUID: %v", nvml.ErrorString(ret))
 		}
 
-		fmt.Printf("Device %d: %s (UUID: %s)\n", i, name, uuid)
+		log.Printf("Device %d: %s (UUID: %s)\n", i, name, uuid)
 	}
 }
 
