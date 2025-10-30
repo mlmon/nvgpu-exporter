@@ -289,6 +289,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		maxLinks, ret := device.GetMaxPcieLinkGeneration()
 		if !errors.Is(ret, nvml.SUCCESS) {
 			// If we can't get max links, try up to 18 (common max for Hopper)
+			log.Printf("Failed to get max PCIe link generation for device %s: %v, defaulting to 18", uuid, nvml.ErrorString(ret))
 			maxLinks = 18
 		}
 
@@ -296,7 +297,15 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		for link := 0; link < int(maxLinks); link++ {
 			// Check if link is active
 			state, ret := device.GetNvLinkState(link)
-			if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
+			if !errors.Is(ret, nvml.SUCCESS) {
+				// Skip this link - likely not available or not supported
+				if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) && !errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
+					log.Printf("Failed to get NVLink state for device %s link %d: %v", uuid, link, nvml.ErrorString(ret))
+				}
+				continue
+			}
+			if state != nvml.FEATURE_ENABLED {
+				log.Printf("NVLink state not enabled for device %s link %d", uuid, link)
 				continue
 			}
 
@@ -304,6 +313,9 @@ func collectNVLinkErrors(devices []nvml.Device) {
 			for _, errCounter := range errorCounters {
 				count, ret := device.GetNvLinkErrorCounter(link, errCounter.counter)
 				if !errors.Is(ret, nvml.SUCCESS) {
+					log.Printf("Failed to get NVLink error counter %s for device %s link %d: %v",
+						errCounter.name, uuid, link, nvml.ErrorString(ret))
+
 					continue
 				}
 
