@@ -46,7 +46,7 @@ spec:
       containers:
         - name: nvml
           image: ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
