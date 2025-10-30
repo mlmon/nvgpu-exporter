@@ -340,16 +340,8 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		}
 		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
 
-		// Get the maximum number of NVLink links
-		maxLinks, ret := device.GetMaxPcieLinkGeneration()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			// If we can't get max links, try up to 18 (common max for Hopper/GB200)
-			log.Printf("Failed to get max PCIe link generation for device %s: %v, defaulting to 18", uuid, nvml.ErrorString(ret))
-			maxLinks = 18
-		}
-
 		// Iterate through each NVLink
-		for link := 0; link < maxLinks; link++ {
+		for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
 			// Check if link is active
 			state, ret := device.GetNvLinkState(link)
 			if !errors.Is(ret, nvml.SUCCESS) {
@@ -360,6 +352,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 				continue
 			}
 			if state != nvml.FEATURE_ENABLED {
+				log.Printf("NVLink state for device %s link %d is not enabled", uuid, link)
 				continue
 			}
 
