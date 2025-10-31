@@ -47,7 +47,7 @@ var (
 			Name:      "nvlink_errors_total",
 			Help:      "Total NVLink errors by type.",
 		},
-		[]string{"uuid", "pci_bus_id", "link", "error_type"},
+		[]string{"UUID", "pci_bus_id", "link", "error_type"},
 	)
 )
 

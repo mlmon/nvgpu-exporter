@@ -38,7 +38,7 @@ var (
 			Name:      "gpu_info",
 			Help:      "GPU device information.",
 		},
-		[]string{"uuid", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
+		[]string{"UUID", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
 	)
 )
 

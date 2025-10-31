@@ -15,7 +15,7 @@ var (
 			Name:      "fabric_health",
 			Help:      "GPU fabric health status (1 = healthy/false, 0 = unhealthy/true).",
 		},
-		[]string{"uuid", "pci_bus_id", "health_field"},
+		[]string{"UUID", "pci_bus_id", "health_field"},
 	)
 )
 
