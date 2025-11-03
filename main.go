@@ -288,6 +288,11 @@ func main() {
 	// Start fabric health collector
 	startCollectors(devices, *collectionInterval)
 
+	// Start Xid event collector
+	if err := startXidEventCollector(devices); err != nil {
+		log.Fatalf("Failed to start Xid event collector: %v", err)
+	}
+
 	listDevices()
 
 	http.Handle("/metrics", promhttp.Handler())
