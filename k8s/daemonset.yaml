@@ -47,6 +47,10 @@ spec:
         - name: nvml
           image: ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:latest
           imagePullPolicy: Always
+          ports:
+            - name: http-metrics
+              containerPort: 9400
+              protocol: TCP
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
