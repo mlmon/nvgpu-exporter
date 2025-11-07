@@ -227,7 +227,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 }
 
 // decodeBER decodes a BER (Bit Error Rate) value from NVML FieldValue
-// BER is encoded as: mantissa (bits 8-22) and exponent (bits 0-7)
+// BER is encoded as: mantissa (bits 8-11) and exponent (bits 0-7)
 // BER = mantissa × 10^(-exponent)
 func decodeBER(fv nvml.FieldValue) (float64, error) {
 	// First extract the raw value as uint64
@@ -239,8 +239,8 @@ func decodeBER(fv nvml.FieldValue) (float64, error) {
 	// Extract exponent (bits 0-7)
 	exponent := rawValue & 0xFF
 
-	// Extract mantissa (bits 8-22)
-	mantissa := (rawValue >> 8) & 0x7FFF
+	// Extract mantissa (bits 8-11) - only 4 bits
+	mantissa := (rawValue >> 8) & 0xF
 
 	// Calculate BER: mantissa × 10^(-exponent)
 	if exponent == 0 && mantissa == 0 {
