@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,6 +23,7 @@ const (
 	nvmlFieldIdNvLinkRecoveryEvents           = 215
 	nvmlFieldIdNvLinkEffectiveErrors          = 219
 	nvmlFieldIdNvLinkEffectiveBER             = 220
+	nvmlFieldIdNvLinkSymbolBER                = 222
 	nvmlFieldIdNvLinkFECHistory0              = 235
 	nvmlFieldIdNvLinkFECHistory1              = 236
 	nvmlFieldIdNvLinkFECHistory2              = 237
@@ -65,7 +67,15 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		{nvmlFieldIdNvLinkRecoveryFailedEvents, "recovery_failed_events"},
 		{nvmlFieldIdNvLinkRecoveryEvents, "recovery_events"},
 		{nvmlFieldIdNvLinkEffectiveErrors, "effective_errors"},
-		{nvmlFieldIdNvLinkEffectiveBER, "effective_ber_errors"},
+	}
+
+	// BER (Bit Error Rate) fields
+	berFields := []struct {
+		fieldId int
+		name    string
+	}{
+		{nvmlFieldIdNvLinkEffectiveBER, "effective_ber"},
+		{nvmlFieldIdNvLinkSymbolBER, "symbol_ber"},
 	}
 
 	// FEC error history counters (0-15)
@@ -153,6 +163,36 @@ func collectNVLinkErrors(devices []nvml.Device) {
 				}
 			}
 
+			// Collect BER (Bit Error Rate) metrics
+			for _, field := range berFields {
+				values := []nvml.FieldValue{
+					{
+						FieldId: uint32(field.fieldId),
+						ScopeId: uint32(link),
+					},
+				}
+
+				ret := device.GetFieldValues(values)
+				if !errors.Is(ret, nvml.SUCCESS) {
+					if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+						log.Printf("Failed to get NVLink BER field %s for device %s link %d: %v",
+							field.name, uuid, link, nvml.ErrorString(ret))
+					}
+					continue
+				}
+
+				if len(values) > 0 {
+					if berValue, err := decodeBER(values[0]); err == nil {
+						nvlinkErrors.WithLabelValues(
+							uuid,
+							pciBusId,
+							fmt.Sprintf("%d", link),
+							field.name,
+						).Set(berValue)
+					}
+				}
+			}
+
 			// Collect FEC error history counters
 			for _, field := range fecFields {
 				values := []nvml.FieldValue{
@@ -183,6 +223,55 @@ func collectNVLinkErrors(devices []nvml.Device) {
 				}
 			}
 		}
+	}
+}
+
+// decodeBER decodes a BER (Bit Error Rate) value from NVML FieldValue
+// BER is encoded as: mantissa (bits 8-22) and exponent (bits 0-7)
+// BER = mantissa × 10^(-exponent)
+func decodeBER(fv nvml.FieldValue) (float64, error) {
+	// First extract the raw value as uint64
+	rawValue, err := fieldValueToUint64(fv)
+	if err != nil {
+		return 0, err
+	}
+
+	// Extract exponent (bits 0-7)
+	exponent := rawValue & 0xFF
+
+	// Extract mantissa (bits 8-22)
+	mantissa := (rawValue >> 8) & 0x7FFF
+
+	// Calculate BER: mantissa × 10^(-exponent)
+	if exponent == 0 && mantissa == 0 {
+		return 0, nil
+	}
+
+	berValue := float64(mantissa) * math.Pow10(-int(exponent))
+	return berValue, nil
+}
+
+// fieldValueToUint64 extracts uint64 from nvml.FieldValue
+func fieldValueToUint64(fv nvml.FieldValue) (uint64, error) {
+	buf := bytes.NewReader(fv.Value[:])
+
+	switch nvml.ValueType(fv.ValueType) {
+	case nvml.VALUE_TYPE_UNSIGNED_INT:
+		var v uint32
+		if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
+			return 0, err
+		}
+		return uint64(v), nil
+
+	case nvml.VALUE_TYPE_UNSIGNED_LONG, nvml.VALUE_TYPE_UNSIGNED_LONG_LONG:
+		var v uint64
+		if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
+			return 0, err
+		}
+		return v, nil
+
+	default:
+		return 0, fmt.Errorf("unsupported field type for BER: %d", fv.ValueType)
 	}
 }
 
