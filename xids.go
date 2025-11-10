@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -19,16 +18,7 @@ var (
 		},
 		[]string{"UUID", "pci_bus_id", "xid"},
 	)
-
-	// Concurrent map to track Xid counts per GPU
-	xidCounts sync.Map
 )
-
-// xidKey is used as a key in the concurrent map
-type xidKey struct {
-	UUID string
-	Xid  uint64
-}
 
 // startXidEventCollector starts a goroutine that subscribes to NVML events and collects Xid errors
 func startXidEventCollector(devices []nvml.Device) error {
@@ -78,6 +68,7 @@ func startXidEventCollector(devices []nvml.Device) error {
 
 // handleXidEvent processes a Xid event and increments the appropriate counter
 func handleXidEvent(event nvml.EventData) {
+
 	// Get device UUID
 	uuid, ret := event.Device.GetUUID()
 	if !errors.Is(ret, nvml.SUCCESS) {
@@ -94,19 +85,6 @@ func handleXidEvent(event nvml.EventData) {
 	pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
 
 	xid := event.EventData
-
-	// Create key for concurrent map
-	key := xidKey{
-		UUID: uuid,
-		Xid:  xid,
-	}
-
-	// Increment count in concurrent map
-	count := uint64(1)
-	if val, ok := xidCounts.LoadOrStore(key, count); ok {
-		count = val.(uint64) + 1
-		xidCounts.Store(key, count)
-	}
 
 	// Increment Prometheus counter
 	xidErrors.WithLabelValues(uuid, pciBusId, formatXid(xid)).Inc()
