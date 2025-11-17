@@ -57,10 +57,17 @@ type GpuInfo struct {
 	InforomImageVersion string
 }
 
-func getGpuVersionDetail(device nvml.Device) (*GpuInfo, error) {
-	info := &GpuInfo{}
+type Devicer interface {
+	GetGpuInfo(i int) (*GpuInfo, error)
+}
 
-	// Get UUID
+type Devices []nvml.Device
+
+func (d Devices) GetGpuInfo(i int) (*GpuInfo, error) {
+	info := &GpuInfo{}
+	device := d[i]
+
+	// Get UUIDe
 	uuid, ret := device.GetUUID()
 	if !errors.Is(ret, nvml.SUCCESS) {
 		return nil, fmt.Errorf("failed to get UUID: %v", nvml.ErrorString(ret))
@@ -203,7 +210,7 @@ func initMetrics() ([]nvml.Device, error) {
 		return nil, fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
 	}
 
-	var devices []nvml.Device
+	var devices Devices
 
 	for i := 0; i < count; i++ {
 		device, ret := nvml.DeviceGetHandleByIndex(i)
@@ -212,7 +219,7 @@ func initMetrics() ([]nvml.Device, error) {
 		}
 		devices = append(devices, device)
 
-		info, err := getGpuVersionDetail(device)
+		info, err := devices.GetGpuInfo(i)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
 		}
@@ -243,6 +250,10 @@ func initMetrics() ([]nvml.Device, error) {
 func startCollectors(devices []nvml.Device, interval time.Duration) {
 	// Register the metrics
 	prometheus.MustRegister(fabricHealth)
+	prometheus.MustRegister(fabricState)
+	prometheus.MustRegister(fabricStatus)
+	prometheus.MustRegister(fabricHealthSummary)
+	prometheus.MustRegister(fabricIncorrectConfig)
 	prometheus.MustRegister(nvlinkErrors)
 
 	// Start the collection goroutine
@@ -301,4 +312,9 @@ func main() {
 	if err := http.ListenAndServe(*addr, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+func Run() error {
+
+	return nil
 }
