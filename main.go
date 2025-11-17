@@ -19,10 +19,8 @@ const (
 )
 
 var (
-	commit             = "unknown"
-	version            = "0.1.0"
-	addr               = flag.String("addr", ":9400", "HTTP server address")
-	collectionInterval = flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
+	commit  = "unknown"
+	version = "0.1.0"
 
 	exporterInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -67,7 +65,7 @@ func (d Devices) GetGpuInfo(i int) (*GpuInfo, error) {
 	info := &GpuInfo{}
 	device := d[i]
 
-	// Get UUIDe
+	// Get UUID
 	uuid, ret := device.GetUUID()
 	if !errors.Is(ret, nvml.SUCCESS) {
 		return nil, fmt.Errorf("failed to get UUID: %v", nvml.ErrorString(ret))
@@ -178,23 +176,23 @@ func listDevices() {
 	}
 }
 
-func initMetrics() ([]nvml.Device, error) {
+func initExporterInfo() error {
 	// Get driver version
 	driverVersion, ret := nvml.SystemGetDriverVersion()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return nil, fmt.Errorf("failed to get driver version: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get driver version: %v", nvml.ErrorString(ret))
 	}
 
 	// Get NVML version
 	nvmlVersion, ret := nvml.SystemGetNVMLVersion()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return nil, fmt.Errorf("failed to get NVML version: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get NVML version: %v", nvml.ErrorString(ret))
 	}
 
 	// Get CUDA version
 	cudaVersion, ret := nvml.SystemGetCudaDriverVersion()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return nil, fmt.Errorf("failed to get CUDA version: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("failed to get CUDA version: %v", nvml.ErrorString(ret))
 	}
 	cudaVersionStr := fmt.Sprintf("%d.%d", cudaVersion/1000, (cudaVersion%1000)/10)
 
@@ -203,7 +201,10 @@ func initMetrics() ([]nvml.Device, error) {
 
 	// Register the exporter info metric
 	prometheus.MustRegister(exporterInfo)
+	return nil
+}
 
+func initGpuInfo() ([]nvml.Device, error) {
 	// Get device count and populate GPU info metrics
 	count, ret := nvml.DeviceGetCount()
 	if !errors.Is(ret, nvml.SUCCESS) {
@@ -276,14 +277,24 @@ func startCollectors(devices []nvml.Device, interval time.Duration) {
 }
 
 func main() {
+	addr := flag.String("addr", ":9400", "HTTP server address")
+	collectionInterval := flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
 	flag.Parse()
 
+	err := Run(addr, collectionInterval)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func Run(addr *string, collectionInterval *time.Duration) error {
 	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
 
 	ret := nvml.Init()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		log.Fatalf("Failed to initialize NVML: %v", nvml.ErrorString(ret))
+		return fmt.Errorf("init of NVML failed: %v", nvml.ErrorString(ret))
 	}
+
 	defer func() {
 		ret := nvml.Shutdown()
 		if !errors.Is(ret, nvml.SUCCESS) {
@@ -291,9 +302,16 @@ func main() {
 		}
 	}()
 
-	devices, err := initMetrics()
+	err := initExporterInfo()
 	if err != nil {
-		log.Fatalf("Failed to initialize metrics: %v", err)
+
+		return fmt.Errorf("failed to initialize exporter metrics: %w", err)
+	}
+
+	devices, err := initGpuInfo()
+	if err != nil {
+
+		return fmt.Errorf("failed to initialize gpu metrics: %w", err)
 	}
 
 	// Start fabric health collector
@@ -301,7 +319,7 @@ func main() {
 
 	// Start Xid event collector
 	if err := startXidEventCollector(devices); err != nil {
-		log.Fatalf("Failed to start Xid event collector: %v", err)
+		return fmt.Errorf("failed to start xid event collector: %w", err)
 	}
 
 	listDevices()
@@ -310,11 +328,8 @@ func main() {
 
 	log.Printf("Starting server on %s", *addr)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		return fmt.Errorf("failed to start server: %w", err)
 	}
-}
-
-func Run() error {
 
 	return nil
 }
