@@ -55,13 +55,13 @@ type GpuInfo struct {
 	InforomImageVersion string
 }
 
-type Devicer interface {
-	GetGpuInfo(i int) (*GpuInfo, error)
+type DevicLister interface {
+	GpuInfo(i int) (*GpuInfo, error)
 }
 
 type Devices []nvml.Device
 
-func (d Devices) GetGpuInfo(i int) (*GpuInfo, error) {
+func (d Devices) GpuInfo(i int) (*GpuInfo, error) {
 	info := &GpuInfo{}
 	device := d[i]
 
@@ -148,31 +148,16 @@ func (d Devices) GetGpuInfo(i int) (*GpuInfo, error) {
 	return info, nil
 }
 
-func listDevices() {
-	count, ret := nvml.DeviceGetCount()
-	if !errors.Is(ret, nvml.SUCCESS) {
-		log.Fatalf("Failed to get device count: %v", nvml.ErrorString(ret))
-	}
+func logDeviceList(devices Devices) {
+	log.Printf("Found %d GPU device(s)\n", len(devices))
 
-	log.Printf("Found %d GPU device(s)\n", count)
-
-	for i := 0; i < count; i++ {
-		device, ret := nvml.DeviceGetHandleByIndex(i)
-		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Fatalf("Failed to get device at index %d: %v", i, nvml.ErrorString(ret))
+	for i := range devices {
+		info, err := devices.GpuInfo(i)
+		if err != nil {
+			log.Fatalf("failed to get GPU info: %v", err)
 		}
 
-		name, ret := device.GetName()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Fatalf("Failed to get device name: %v", nvml.ErrorString(ret))
-		}
-
-		uuid, ret := device.GetUUID()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Fatalf("Failed to get device UUID: %v", nvml.ErrorString(ret))
-		}
-
-		log.Printf("Device %d: %s (UUID: %s)\n", i, name, uuid)
+		log.Printf("Device %d: %s (UUID: %s)\n", i, info.Name, info.UUID)
 	}
 }
 
@@ -204,25 +189,11 @@ func initExporterInfo() error {
 	return nil
 }
 
-func initGpuInfo() ([]nvml.Device, error) {
-	// Get device count and populate GPU info metrics
-	count, ret := nvml.DeviceGetCount()
-	if !errors.Is(ret, nvml.SUCCESS) {
-		return nil, fmt.Errorf("failed to get device count: %v", nvml.ErrorString(ret))
-	}
-
-	var devices Devices
-
-	for i := 0; i < count; i++ {
-		device, ret := nvml.DeviceGetHandleByIndex(i)
-		if !errors.Is(ret, nvml.SUCCESS) {
-			return nil, fmt.Errorf("failed to get device at index %d: %v", i, nvml.ErrorString(ret))
-		}
-		devices = append(devices, device)
-
-		info, err := devices.GetGpuInfo(i)
+func initGpuInfo(devices Devices) error {
+	for i := range devices {
+		info, err := devices.GpuInfo(i)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
+			return fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
 		}
 
 		// Set GPU info metric
@@ -244,7 +215,7 @@ func initGpuInfo() ([]nvml.Device, error) {
 	// Register the GPU info metric
 	prometheus.MustRegister(gpuInfo)
 
-	return devices, nil
+	return nil
 }
 
 // startCollectors starts a goroutine that periodically collects fabric health and NVLink error metrics
@@ -281,18 +252,9 @@ func main() {
 	collectionInterval := flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
 	flag.Parse()
 
-	err := Run(addr, collectionInterval)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func Run(addr *string, collectionInterval *time.Duration) error {
-	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
-
 	ret := nvml.Init()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return fmt.Errorf("init of NVML failed: %v", nvml.ErrorString(ret))
+		log.Fatalf("Init of NVML failed: %v", nvml.ErrorString(ret))
 	}
 
 	defer func() {
@@ -302,13 +264,38 @@ func Run(addr *string, collectionInterval *time.Duration) error {
 		}
 	}()
 
+	// Get device count and populate GPU info metrics
+	count, ret := nvml.DeviceGetCount()
+	if !errors.Is(ret, nvml.SUCCESS) {
+		log.Fatalf("failed to get device count: %v", nvml.ErrorString(ret))
+	}
+
+	var devices Devices
+
+	for i := 0; i < count; i++ {
+		device, ret := nvml.DeviceGetHandleByIndex(i)
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Fatalf("failed to get device at index %d: %v", i, nvml.ErrorString(ret))
+		}
+		devices = append(devices, device)
+	}
+
+	err := Run(addr, collectionInterval, devices)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func Run(addr *string, collectionInterval *time.Duration, devices Devices) error {
+	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
+
 	err := initExporterInfo()
 	if err != nil {
 
 		return fmt.Errorf("failed to initialize exporter metrics: %w", err)
 	}
 
-	devices, err := initGpuInfo()
+	err = initGpuInfo(devices)
 	if err != nil {
 
 		return fmt.Errorf("failed to initialize gpu metrics: %w", err)
@@ -322,7 +309,7 @@ func Run(addr *string, collectionInterval *time.Duration) error {
 		return fmt.Errorf("failed to start xid event collector: %w", err)
 	}
 
-	listDevices()
+	logDeviceList(devices)
 
 	http.Handle("/metrics", promhttp.Handler())
 
