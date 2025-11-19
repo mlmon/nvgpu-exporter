@@ -23,6 +23,7 @@ const (
 	nvmlFieldIdNvLinkRecoveryEvents           = 215
 	nvmlFieldIdNvLinkEffectiveErrors          = 219
 	nvmlFieldIdNvLinkEffectiveBER             = 220
+	nvmlFieldIdNvLinkSymbolErrors             = 221
 	nvmlFieldIdNvLinkSymbolBER                = 222
 	nvmlFieldIdNvLinkFECHistory0              = 235
 	nvmlFieldIdNvLinkFECHistory1              = 236
@@ -67,6 +68,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		{nvmlFieldIdNvLinkRecoveryFailedEvents, "recovery_failed_events"},
 		{nvmlFieldIdNvLinkRecoveryEvents, "recovery_events"},
 		{nvmlFieldIdNvLinkEffectiveErrors, "effective_errors"},
+		{nvmlFieldIdNvLinkSymbolErrors, "symbol_errors"},
 	}
 
 	// BER (Bit Error Rate) fields
