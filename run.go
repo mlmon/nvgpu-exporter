@@ -9,6 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// Run initializes metrics, starts collectors, and exposes the Prometheus HTTP handler.
 func Run(addr *string, collectionInterval *time.Duration, devices Devices) error {
 	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
 

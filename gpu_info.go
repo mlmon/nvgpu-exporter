@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// GpuInfo captures immutable metadata about a GPU returned by NVML.
 type GpuInfo struct {
 	UUID                string
 	PciBusId            string
@@ -22,12 +23,14 @@ type GpuInfo struct {
 	InforomImageVersion string
 }
 
+// ExporterInfo stores driver/library versions exposed by the exporter.
 type ExporterInfo struct {
 	CudaVersion   string
 	DriverVersion string
 	NVMLVersion   string
 }
 
+// DeviceLister abstracts GPU/driver metadata collection so it can be mocked in tests.
 type DeviceLister interface {
 	GpuInfo(i int) (*GpuInfo, error)
 	ExporterInfo() (*ExporterInfo, error)

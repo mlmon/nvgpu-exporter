@@ -15,6 +15,8 @@ func shutdown() {
 	}
 }
 
+// New initializes the NVML library, discovers every GPU device, and returns the
+// handles alongside a cleanup routine that must be called on shutdown.
 func New() (Devices, func(), error) {
 	ret := nvml.Init()
 	if !errors.Is(ret, nvml.SUCCESS) {
@@ -39,8 +41,10 @@ func New() (Devices, func(), error) {
 	return devices, shutdown, nil
 }
 
+// Devices is a thin slice wrapper that provides helper methods for NVML queries.
 type Devices []nvml.Device
 
+// ExporterInfo queries system-wide NVML state to describe the exporter host.
 func (d Devices) ExporterInfo() (*ExporterInfo, error) {
 	info := &ExporterInfo{}
 	var ret nvml.Return
@@ -66,6 +70,7 @@ func (d Devices) ExporterInfo() (*ExporterInfo, error) {
 	return info, nil
 }
 
+// GpuInfo populates detailed metadata for the GPU at index i.
 func (d Devices) GpuInfo(i int) (*GpuInfo, error) {
 	info := &GpuInfo{}
 	device := d[i]
