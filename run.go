@@ -13,24 +13,25 @@ import (
 func Run(addr *string, collectionInterval *time.Duration, devices Devices) error {
 	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
 
-	err := initExporterInfo(devices, version, commit)
+	gpuInfos, err := loadGpuInfos(devices)
 	if err != nil {
+		return fmt.Errorf("failed to preload gpu info: %w", err)
+	}
 
+	if err := initExporterInfo(devices, version, commit); err != nil {
 		return fmt.Errorf("failed to initialize exporter metrics: %w", err)
 	}
 
-	err = initGpuInfo(devices)
-	if err != nil {
-
+	if err := initGpuInfoWithCache(gpuInfos); err != nil {
 		return fmt.Errorf("failed to initialize gpu metrics: %w", err)
 	}
 
-	if err := initTopologyInfo(devices); err != nil {
+	if err := initTopologyInfo(devices, gpuInfos); err != nil {
 		log.Printf("failed to initialize topology metrics: %v", err)
 	}
 
 	// Start fabric health collector
-	startCollectors(devices, *collectionInterval)
+	startCollectors(devices, *collectionInterval, gpuInfos)
 
 	// Start Xid event collector
 	if err := startXidEventCollector(devices); err != nil {

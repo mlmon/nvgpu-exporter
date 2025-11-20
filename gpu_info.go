@@ -82,12 +82,23 @@ func initExporterInfo(devices DeviceLister, version string, commit string) error
 	return nil
 }
 
-func initGpuInfo(devices DeviceLister) error {
-	for i := 0; i < devices.Count(); i++ {
+func loadGpuInfos(devices DeviceLister) ([]*GpuInfo, error) {
+	count := devices.Count()
+	infos := make([]*GpuInfo, 0, count)
+
+	for i := 0; i < count; i++ {
 		info, err := devices.GpuInfo(i)
 		if err != nil {
-			return fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
+			return nil, fmt.Errorf("failed to get GPU info for device %d: %w", i, err)
 		}
+		infos = append(infos, info)
+	}
+
+	return infos, nil
+}
+
+func initGpuInfoWithCache(infos []*GpuInfo) error {
+	for _, info := range infos {
 
 		// Set GPU info metric
 		gpuInfo.WithLabelValues(
@@ -112,7 +123,7 @@ func initGpuInfo(devices DeviceLister) error {
 }
 
 // startCollectors starts a goroutine that periodically collects fabric health and NVLink error metrics
-func startCollectors(devices Devices, interval time.Duration) {
+func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) {
 	// Register the metrics
 	prometheus.MustRegister(fabricHealth)
 	prometheus.MustRegister(fabricState)
@@ -131,7 +142,7 @@ func startCollectors(devices Devices, interval time.Duration) {
 		collectFabricHealth(devices)
 		collectNVLinkErrors(devices)
 		collectClockEventReasons(devices)
-		if err := collectGpuTopologyInfo(devices); err != nil {
+		if err := collectGpuTopologyInfo(devices, infos); err != nil {
 			log.Printf("failed to collect topology info: %v", err)
 		}
 
@@ -140,7 +151,7 @@ func startCollectors(devices Devices, interval time.Duration) {
 			collectFabricHealth(devices)
 			collectNVLinkErrors(devices)
 			collectClockEventReasons(devices)
-			if err := collectGpuTopologyInfo(devices); err != nil {
+			if err := collectGpuTopologyInfo(devices, infos); err != nil {
 				log.Printf("failed to collect topology info: %v", err)
 			}
 		}

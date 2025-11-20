@@ -67,7 +67,10 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 		},
 	}
 
-	err := initGpuInfo(devices)
+	infos, err := loadGpuInfos(devices)
+	assert.Is(hammy.True(err == nil))
+
+	err = initGpuInfoWithCache(infos)
 	assert.Is(hammy.True(err == nil))
 
 	for _, info := range devices.gpuInfos {
@@ -100,7 +103,7 @@ func TestInitGpuInfoPropagatesErrors(t *testing.T) {
 		gpuErr:   errors.New("boom"),
 	}
 
-	err := initGpuInfo(devices)
+	_, err := loadGpuInfos(devices)
 	assert.Is(hammy.True(err != nil))
 	assert.Is(hammy.String(err.Error()).Contains("failed to get GPU info"))
 }
