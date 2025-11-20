@@ -12,7 +12,7 @@ var (
 	clockEventDurations = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
-			Name:      "clocks_event_duration_nanoseconds_total",
+			Name:      "clocks_event_duration_cumulative_total",
 			Help:      "Accumulated time (nanoseconds) spent throttled per NVML clock event reason.",
 		},
 		[]string{"UUID", "pci_bus_id", "reason"},
