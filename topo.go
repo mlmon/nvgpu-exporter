@@ -11,6 +11,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type nicInfo struct {
+	label       string
+	pciKey      string
+	connections map[int]struct{}
+}
+
 var (
 	gpuTopologyInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -51,7 +57,6 @@ func initTopologyInfo(devices Devices) error {
 	if err := collectGpuTopologyInfo(devices); err != nil {
 		return err
 	}
-	collectNicTopologyInfo()
 	return nil
 }
 
@@ -80,6 +85,8 @@ func collectGpuTopologyInfo(devices Devices) error {
 		return label
 	}
 
+	nicList := discoverNicLinks(devices)
+
 	for i := range devices {
 		info, err := devices.GpuInfo(i)
 		if err != nil {
@@ -88,7 +95,7 @@ func collectGpuTopologyInfo(devices Devices) error {
 
 		labels := prometheus.Labels{
 			"UUID": info.UUID,
-			"name": info.Name,
+			"name": fmt.Sprintf("gpu%d", i),
 		}
 
 		for idx, key := range gpuLabelKeys {
@@ -100,8 +107,16 @@ func collectGpuTopologyInfo(devices Devices) error {
 			labels[key] = getTopologyLabel(i, idx)
 		}
 
-		for _, key := range nicLabelKeys {
-			labels[key] = "unknown"
+		for idx, key := range nicLabelKeys {
+			if idx >= len(nicList) {
+				labels[key] = "absent"
+				continue
+			}
+			if _, ok := nicList[idx].connections[i]; ok {
+				labels[key] = "NODE"
+			} else {
+				labels[key] = "SYS"
+			}
 		}
 
 		labels["cpu_affinity"] = getCpuAffinityString(devices[i], numCPUs)
@@ -118,15 +133,9 @@ func collectGpuTopologyInfo(devices Devices) error {
 		gpuTopologyInfo.With(labels).Set(1)
 	}
 
-	return nil
-}
+	recordNicTopology(nicList, len(devices))
 
-func collectNicTopologyInfo() {
-	labels := prometheus.Labels{"name": "unsupported"}
-	for _, key := range append(gpuLabelKeys, nicLabelKeys...) {
-		labels[key] = "unknown"
-	}
-	nicTopologyInfo.With(labels).Set(0)
+	return nil
 }
 
 func topologyLevelToString(level nvml.GpuTopologyLevel) string {
@@ -193,6 +202,78 @@ func formatRange(start, end int) string {
 		return fmt.Sprintf("%d", start)
 	}
 	return fmt.Sprintf("%d-%d", start, end)
+}
+
+func discoverNicLinks(devices Devices) []*nicInfo {
+	nicByKey := make(map[string]*nicInfo)
+	var nicList []*nicInfo
+
+	for i := range devices {
+		for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
+			state, ret := devices[i].GetNvLinkState(link)
+			if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
+				continue
+			}
+
+			remoteType, ret := devices[i].GetNvLinkRemoteDeviceType(link)
+			if !errors.Is(ret, nvml.SUCCESS) || remoteType != nvml.NVLINK_DEVICE_TYPE_IBMNPU {
+				continue
+			}
+
+			remotePci, ret := devices[i].GetNvLinkRemotePciInfo(link)
+			if !errors.Is(ret, nvml.SUCCESS) {
+				continue
+			}
+
+			pciKey := pciBusIdToString(remotePci.BusIdLegacy)
+			nic := nicByKey[pciKey]
+			if nic == nil {
+				if len(nicList) >= len(nicLabelKeys) {
+					continue
+				}
+				nic = &nicInfo{
+					label:       nicLabelKeys[len(nicList)],
+					pciKey:      pciKey,
+					connections: make(map[int]struct{}),
+				}
+				nicByKey[pciKey] = nic
+				nicList = append(nicList, nic)
+			}
+			nic.connections[i] = struct{}{}
+		}
+	}
+
+	return nicList
+}
+
+func recordNicTopology(nicList []*nicInfo, gpuCount int) {
+	for idx, nic := range nicList {
+		labels := prometheus.Labels{
+			"name": nic.label,
+		}
+
+		for gpuIdx, key := range gpuLabelKeys {
+			if gpuIdx >= gpuCount {
+				labels[key] = "absent"
+				continue
+			}
+			if _, ok := nic.connections[gpuIdx]; ok {
+				labels[key] = "NODE"
+			} else {
+				labels[key] = "SYS"
+			}
+		}
+
+		for nicIdx, key := range nicLabelKeys {
+			if nicIdx == idx {
+				labels[key] = "X"
+			} else {
+				labels[key] = "unknown"
+			}
+		}
+
+		nicTopologyInfo.With(labels).Set(1)
+	}
 }
 
 func min(a, b int) int {
