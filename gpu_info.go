@@ -32,14 +32,15 @@ type ExporterInfo struct {
 
 // DeviceLister abstracts GPU/driver metadata collection so it can be mocked in tests.
 type DeviceLister interface {
+	Count() int
 	GpuInfo(i int) (*GpuInfo, error)
 	ExporterInfo() (*ExporterInfo, error)
 }
 
-func logDeviceList(devices Devices) {
-	log.Printf("Found %d GPU device(s)\n", len(devices))
+func logDeviceList(devices DeviceLister) {
+	log.Printf("Found %d GPU device(s)\n", devices.Count())
 
-	for i := range devices {
+	for i := 0; i < devices.Count(); i++ {
 		info, err := devices.GpuInfo(i)
 		if err != nil {
 			log.Fatalf("failed to get GPU info: %v", err)
@@ -67,7 +68,7 @@ var gpuInfo = prometheus.NewGaugeVec(
 	[]string{"UUID", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
 )
 
-func initExporterInfo(devices Devices, version string, commit string) error {
+func initExporterInfo(devices DeviceLister, version string, commit string) error {
 	info, err := devices.ExporterInfo()
 	if err != nil {
 		return err
@@ -81,8 +82,8 @@ func initExporterInfo(devices Devices, version string, commit string) error {
 	return nil
 }
 
-func initGpuInfo(devices Devices) error {
-	for i := range devices {
+func initGpuInfo(devices DeviceLister) error {
+	for i := 0; i < devices.Count(); i++ {
 		info, err := devices.GpuInfo(i)
 		if err != nil {
 			return fmt.Errorf("failed to get GPU info for device %d: %w", i, err)

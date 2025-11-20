@@ -44,6 +44,11 @@ func New() (Devices, func(), error) {
 // Devices is a thin slice wrapper that provides helper methods for NVML queries.
 type Devices []nvml.Device
 
+// Count returns how many GPU handles are tracked in the slice.
+func (d Devices) Count() int {
+	return len(d)
+}
+
 // ExporterInfo queries system-wide NVML state to describe the exporter host.
 func (d Devices) ExporterInfo() (*ExporterInfo, error) {
 	info := &ExporterInfo{}
