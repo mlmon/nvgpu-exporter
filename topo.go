@@ -50,17 +50,17 @@ var (
 	nicLabelKeys = []string{"nic0", "nic1", "nic2", "nic3", "nic4", "nic5"}
 )
 
-func initTopologyInfo(devices Devices) error {
+func initTopologyInfo(devices Devices, infos []*GpuInfo) error {
 	prometheus.MustRegister(gpuTopologyInfo)
 	prometheus.MustRegister(nicTopologyInfo)
 
-	if err := collectGpuTopologyInfo(devices); err != nil {
+	if err := collectGpuTopologyInfo(devices, infos); err != nil {
 		return err
 	}
 	return nil
 }
 
-func collectGpuTopologyInfo(devices Devices) error {
+func collectGpuTopologyInfo(devices Devices, infos []*GpuInfo) error {
 	numCPUs := runtime.NumCPU()
 	type topoKey struct {
 		a int
