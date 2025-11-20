@@ -1,5 +1,7 @@
 # nvgpu-exporter
 
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/mlmon/nvgpu-exporter) [![Go Report Card](https://goreportcard.com/badge/github.com/mlmon/nvgpu-exporter)](https://goreportcard.com/report/github.com/mlmon/nvgpu-exporter) [![codecov](https://codecov.io/gh/mlmon/nvgpu-exporter/graph/badge.svg?token=2T2YXJGEJV)](https://codecov.io/gh/mlmon/nvgpu-exporter)
+
 nvgpu-exporter is a lightweight Prometheus exporter that surfaces detailed NVIDIA
 GPU information and health telemetry pulled directly from NVML. The exporter was
 built to make it easy to monitor fabric health on Hopper/Blackwell class GPUs,
