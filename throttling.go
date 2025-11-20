@@ -12,8 +12,8 @@ var (
 	clockEventDurations = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
-			Name:      "clocks_event_duration_seconds_total",
-			Help:      "Accumulated time spent throttled per NVML clock event reason.",
+			Name:      "clocks_event_duration_nanoseconds_total",
+			Help:      "Accumulated time (nanoseconds) spent throttled per NVML clock event reason.",
 		},
 		[]string{"UUID", "pci_bus_id", "reason"},
 	)
@@ -64,7 +64,7 @@ func collectClockEventReasons(devices []nvml.Device) {
 				continue
 			}
 
-			durationSeconds, err := clockEventFieldValueToSeconds(fv)
+			durationNanoseconds, err := clockEventFieldValueToNanoseconds(fv)
 			if err != nil {
 				log.Printf("Failed to decode clock event field %s for device %s: %v", field.reason, uuid, err)
 				continue
@@ -74,18 +74,17 @@ func collectClockEventReasons(devices []nvml.Device) {
 				uuid,
 				pciBusId,
 				field.reason,
-			).Set(durationSeconds)
+			).Set(durationNanoseconds)
 		}
 	}
 }
 
-func clockEventFieldValueToSeconds(fv nvml.FieldValue) (float64, error) {
+func clockEventFieldValueToNanoseconds(fv nvml.FieldValue) (float64, error) {
 	value, err := fieldValueToFloat64(fv)
 	if err != nil {
 		return 0, err
 	}
-	// NVML reports throttle counters in nanoseconds, convert to seconds.
-	return value / 1e9, nil
+	return value, nil
 }
 
 func buildClockEventRequests() ([]nvml.FieldValue, map[uint32]int) {
