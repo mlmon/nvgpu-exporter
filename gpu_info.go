@@ -120,6 +120,7 @@ func startCollectors(devices Devices, interval time.Duration) {
 	prometheus.MustRegister(fabricHealthSummary)
 	prometheus.MustRegister(fabricIncorrectConfig)
 	prometheus.MustRegister(nvlinkErrors)
+	prometheus.MustRegister(clockEventDurations)
 
 	// Start the collection goroutine
 	go func() {
@@ -129,11 +130,13 @@ func startCollectors(devices Devices, interval time.Duration) {
 		// Collect immediately on start
 		collectFabricHealth(devices)
 		collectNVLinkErrors(devices)
+		collectClockEventReasons(devices)
 
 		// Then collect periodically
 		for range ticker.C {
 			collectFabricHealth(devices)
 			collectNVLinkErrors(devices)
+			collectClockEventReasons(devices)
 		}
 	}()
 

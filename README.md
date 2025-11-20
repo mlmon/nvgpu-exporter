@@ -66,6 +66,8 @@ source hints, is available in [`docs/metrics.md`](docs/metrics.md). Highlights:
   per-field health flags decoded from the NVML health mask.
 - `nvgpu_nvlink_errors_total`: per-link GB200 NVLink error counters, BER data,
   and FEC history values when supported by the hardware.
+- `nvgpu_clocks_event_duration_seconds_total`: cumulative time GPUs spent
+  throttled for each NVML clock event reason.
 - `nvgpu_xid_errors_total`: cumulative count of NVML Xid errors by code.
 
 ## Kubernetes deployment
