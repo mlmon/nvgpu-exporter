@@ -45,26 +45,26 @@ func collectClockEventReasons(devices []nvml.Device) {
 		}
 		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
 
-		for _, field := range clockEventReasonFields {
-			values := []nvml.FieldValue{
-				{
-					FieldId: field.fieldID,
-				},
-			}
+		fieldValues, index := buildClockEventRequests()
 
-			ret := device.GetFieldValues(values)
-			if !errors.Is(ret, nvml.SUCCESS) {
-				if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-					log.Printf("Failed to get clock event field %s for device %s: %v", field.reason, uuid, nvml.ErrorString(ret))
+		ret = device.GetFieldValues(fieldValues)
+		if !errors.Is(ret, nvml.SUCCESS) {
+			if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+				log.Printf("Failed to get clock event fields for device %s: %v", uuid, nvml.ErrorString(ret))
+			}
+			continue
+		}
+
+		for _, field := range clockEventReasonFields {
+			fv := fieldValues[index[field.fieldID]]
+			if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
+				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
+					log.Printf("Clock event field %s unavailable for device %s: %v", field.reason, uuid, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 				}
 				continue
 			}
 
-			if len(values) == 0 {
-				continue
-			}
-
-			durationSeconds, err := clockEventFieldValueToSeconds(values[0])
+			durationSeconds, err := clockEventFieldValueToSeconds(fv)
 			if err != nil {
 				log.Printf("Failed to decode clock event field %s for device %s: %v", field.reason, uuid, err)
 				continue
@@ -86,4 +86,18 @@ func clockEventFieldValueToSeconds(fv nvml.FieldValue) (float64, error) {
 	}
 	// NVML reports throttle counters in nanoseconds, convert to seconds.
 	return value / 1e9, nil
+}
+
+func buildClockEventRequests() ([]nvml.FieldValue, map[uint32]int) {
+	values := make([]nvml.FieldValue, 0, len(clockEventReasonFields))
+	index := make(map[uint32]int, len(clockEventReasonFields))
+
+	for _, field := range clockEventReasonFields {
+		index[field.fieldID] = len(values)
+		values = append(values, nvml.FieldValue{
+			FieldId: field.fieldID,
+		})
+	}
+
+	return values, index
 }

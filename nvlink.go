@@ -52,12 +52,8 @@ var (
 		},
 		[]string{"UUID", "pci_bus_id", "link", "error_type"},
 	)
-)
 
-// collectNVLinkErrors collects NVLink error counters for all devices using Field Values API (GB200 compatible)
-func collectNVLinkErrors(devices []nvml.Device) {
-	// GB200 NVLink error counter field IDs
-	errorFields := []struct {
+	nvlinkErrorFields = []struct {
 		fieldId int
 		name    string
 	}{
@@ -71,8 +67,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		{nvmlFieldIdNvLinkSymbolErrors, "symbol_errors"},
 	}
 
-	// BER (Bit Error Rate) fields
-	berFields := []struct {
+	nvlinkBerFields = []struct {
 		fieldId int
 		name    string
 	}{
@@ -80,8 +75,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		{nvmlFieldIdNvLinkSymbolBER, "symbol_ber"},
 	}
 
-	// FEC error history counters (0-15)
-	fecFields := []struct {
+	nvlinkFecFields = []struct {
 		fieldId int
 		name    string
 	}{
@@ -102,7 +96,10 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		{nvmlFieldIdNvLinkFECHistory14, "fec_errors_14"},
 		{nvmlFieldIdNvLinkFECHistory15, "fec_errors_15"},
 	}
+)
 
+// collectNVLinkErrors collects NVLink error counters for all devices using Field Values API (GB200 compatible)
+func collectNVLinkErrors(devices []nvml.Device) {
 	for _, device := range devices {
 		uuid, ret := device.GetUUID()
 		if !errors.Is(ret, nvml.SUCCESS) {
@@ -118,114 +115,141 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		}
 		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
 
-		// Iterate through each NVLink
+		fieldValues, index := buildDeviceWideNvLinkRequests(device)
+		if len(fieldValues) == 0 {
+			continue
+		}
+
+		ret = device.GetFieldValues(fieldValues)
+		if !errors.Is(ret, nvml.SUCCESS) {
+			if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+				log.Printf("Failed to get NVLink fields for device %s: %v",
+					uuid, nvml.ErrorString(ret))
+			}
+			continue
+		}
+
 		for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
-			// Check if link is active
-			state, ret := device.GetNvLinkState(link)
-			if !errors.Is(ret, nvml.SUCCESS) {
-				// Skip this link - likely not available or not supported
-				if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) && !errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
-					log.Printf("Failed to get NVLink state for device %s link %d: %v", uuid, link, nvml.ErrorString(ret))
-				}
-				continue
-			}
-			if state != nvml.FEATURE_ENABLED {
-				log.Printf("NVLink state for device %s link %d is not enabled", uuid, link)
+			if !linkActive(device, uuid, link) {
 				continue
 			}
 
-			// Collect standard error counters using Field Values API
-			for _, field := range errorFields {
-				values := []nvml.FieldValue{
-					{
-						FieldId: uint32(field.fieldId),
-						ScopeId: uint32(link),
-					},
-				}
-
-				ret := device.GetFieldValues(values)
-				if !errors.Is(ret, nvml.SUCCESS) {
-					// Log unexpected errors, but not "not supported" errors
-					if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-						log.Printf("Failed to get NVLink field %s for device %s link %d: %v",
-							field.name, uuid, link, nvml.ErrorString(ret))
+			for _, field := range nvlinkErrorFields {
+				fv := fieldValues[index[nvlinkFieldKey{fieldId: field.fieldId, link: link}]]
+				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
+					if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
+						log.Printf("Field %s not available for device %s link %d: %v", field.name, uuid, link, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 					}
 					continue
 				}
 
-				if len(values) > 0 {
-					if f, err := fieldValueToFloat64(values[0]); err == nil {
-						nvlinkErrors.WithLabelValues(
-							uuid,
-							pciBusId,
-							fmt.Sprintf("%d", link),
-							field.name,
-						).Set(f)
-					}
+				if f, err := fieldValueToFloat64(fv); err == nil {
+					nvlinkErrors.WithLabelValues(
+						uuid,
+						pciBusId,
+						fmt.Sprintf("%d", link),
+						field.name,
+					).Set(f)
 				}
 			}
 
 			// Collect BER (Bit Error Rate) metrics
-			for _, field := range berFields {
-				values := []nvml.FieldValue{
-					{
-						FieldId: uint32(field.fieldId),
-						ScopeId: uint32(link),
-					},
-				}
-
-				ret := device.GetFieldValues(values)
-				if !errors.Is(ret, nvml.SUCCESS) {
-					if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-						log.Printf("Failed to get NVLink BER field %s for device %s link %d: %v",
-							field.name, uuid, link, nvml.ErrorString(ret))
+			for _, field := range nvlinkBerFields {
+				fv := fieldValues[index[nvlinkFieldKey{fieldId: field.fieldId, link: link}]]
+				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
+					if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
+						log.Printf("BER field %s not available for device %s link %d: %v", field.name, uuid, link, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 					}
 					continue
 				}
 
-				if len(values) > 0 {
-					if berValue, err := decodeBER(values[0]); err == nil {
-						nvlinkErrors.WithLabelValues(
-							uuid,
-							pciBusId,
-							fmt.Sprintf("%d", link),
-							field.name,
-						).Set(berValue)
-					}
+				if berValue, err := decodeBER(fv); err == nil {
+					nvlinkErrors.WithLabelValues(
+						uuid,
+						pciBusId,
+						fmt.Sprintf("%d", link),
+						field.name,
+					).Set(berValue)
 				}
 			}
 
 			// Collect FEC error history counters
-			for _, field := range fecFields {
-				values := []nvml.FieldValue{
-					{
-						FieldId: uint32(field.fieldId),
-						ScopeId: uint32(link),
-					},
-				}
-
-				ret := device.GetFieldValues(values)
-				if !errors.Is(ret, nvml.SUCCESS) {
-					if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-						log.Printf("Failed to get NVLink FEC field %s for device %s link %d: %v",
-							field.name, uuid, link, nvml.ErrorString(ret))
+			for _, field := range nvlinkFecFields {
+				fv := fieldValues[index[nvlinkFieldKey{fieldId: field.fieldId, link: link}]]
+				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
+					if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
+						log.Printf("FEC field %s not available for device %s link %d: %v", field.name, uuid, link, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 					}
 					continue
 				}
 
-				if len(values) > 0 {
-					if f, err := fieldValueToFloat64(values[0]); err == nil {
-						nvlinkErrors.WithLabelValues(
-							uuid,
-							pciBusId,
-							fmt.Sprintf("%d", link),
-							field.name,
-						).Set(f)
-					}
+				if f, err := fieldValueToFloat64(fv); err == nil {
+					nvlinkErrors.WithLabelValues(
+						uuid,
+						pciBusId,
+						fmt.Sprintf("%d", link),
+						field.name,
+					).Set(f)
 				}
 			}
 		}
 	}
+}
+
+type nvlinkFieldKey struct {
+	fieldId int
+	link    int
+}
+
+func linkActive(device nvml.Device, uuid string, link int) bool {
+	state, ret := device.GetNvLinkState(link)
+	if !errors.Is(ret, nvml.SUCCESS) {
+		if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) && !errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
+			log.Printf("Failed to get NVLink state for device %s link %d: %v", uuid, link, nvml.ErrorString(ret))
+		}
+		return false
+	}
+
+	if state != nvml.FEATURE_ENABLED {
+		log.Printf("NVLink state for device %s link %d is not enabled", uuid, link)
+		return false
+	}
+
+	return true
+}
+
+func buildDeviceWideNvLinkRequests(device nvml.Device) ([]nvml.FieldValue, map[nvlinkFieldKey]int) {
+	totalFields := len(nvlinkErrorFields) + len(nvlinkBerFields) + len(nvlinkFecFields)
+	values := make([]nvml.FieldValue, 0, totalFields*nvml.NVLINK_MAX_LINKS)
+	index := make(map[nvlinkFieldKey]int, totalFields*nvml.NVLINK_MAX_LINKS)
+
+	for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
+		state, ret := device.GetNvLinkState(link)
+		if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
+			continue
+		}
+
+		add := func(fieldID int) {
+			key := nvlinkFieldKey{fieldId: fieldID, link: link}
+			index[key] = len(values)
+			values = append(values, nvml.FieldValue{
+				FieldId: uint32(fieldID),
+				ScopeId: uint32(link),
+			})
+		}
+
+		for _, field := range nvlinkErrorFields {
+			add(field.fieldId)
+		}
+		for _, field := range nvlinkBerFields {
+			add(field.fieldId)
+		}
+		for _, field := range nvlinkFecFields {
+			add(field.fieldId)
+		}
+	}
+
+	return values, index
 }
 
 // decodeBER decodes a BER (Bit Error Rate) value from NVML FieldValue
