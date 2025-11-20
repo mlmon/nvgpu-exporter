@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -79,33 +81,48 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Extract tag name
-      id: extract_tag
-      run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
     - name: Extract short SHA
       id: extract_sha
       run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-    - name: Extract version (strip v prefix)
-      id: extract_version
-      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    - name: Determine release metadata
+      id: release_meta
+      run: |
+        ref="${GITHUB_REF}"
+        short_sha="${{ steps.extract_sha.outputs.short_sha }}"
+        include_latest="false"
+        if [[ "$ref" == refs/tags/v* ]]; then
+          tag="${ref#refs/tags/}"
+          version="${tag#v}"
+          include_latest="true"
+        else
+          tag="rel-${short_sha}"
+          version="dev-${short_sha}"
+        fi
+        echo "tag=${tag}" >> $GITHUB_OUTPUT
+        echo "version=${version}" >> $GITHUB_OUTPUT
+        echo "include_latest=${include_latest}" >> $GITHUB_OUTPUT
 
     - name: Build and push with ko
       env:
         CGO_ENABLED: "1"
         CC: ${{ matrix.cc }}
-        VERSION: ${{ steps.extract_version.outputs.version }}
+        VERSION: ${{ steps.release_meta.outputs.version }}
         COMMIT: ${{ steps.extract_sha.outputs.short_sha }}
+        INCLUDE_LATEST: ${{ steps.release_meta.outputs.include_latest }}
       run: |
         # Verify toolchain in logs
         $CC --version || true
         go env
         echo "Building for $GOOS/$GOARCH with CC=$CC"
+        tags="${{ steps.release_meta.outputs.tag }},${{ steps.extract_sha.outputs.short_sha }}"
+        if [[ "${INCLUDE_LATEST}" == "true" ]]; then
+          tags="$tags,latest"
+        fi
         ko build . \
           --platform=${{ matrix.platform }} \
           --base-import-paths \
-          --tags=${{ steps.extract_tag.outputs.tag }},${{ steps.extract_sha.outputs.short_sha }},latest \
+          --tags=$tags \
           --image-label=org.opencontainers.image.source=https://github.com/${{ github.repository }} \
           --image-label=org.opencontainers.image.version=${{ steps.extract_version.outputs.version }} \
           --image-label=org.opencontainers.image.revision=${{ github.sha }}
