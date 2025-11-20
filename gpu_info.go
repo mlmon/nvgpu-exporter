@@ -131,12 +131,18 @@ func startCollectors(devices Devices, interval time.Duration) {
 		collectFabricHealth(devices)
 		collectNVLinkErrors(devices)
 		collectClockEventReasons(devices)
+		if err := collectGpuTopologyInfo(devices); err != nil {
+			log.Printf("failed to collect topology info: %v", err)
+		}
 
 		// Then collect periodically
 		for range ticker.C {
 			collectFabricHealth(devices)
 			collectNVLinkErrors(devices)
 			collectClockEventReasons(devices)
+			if err := collectGpuTopologyInfo(devices); err != nil {
+				log.Printf("failed to collect topology info: %v", err)
+			}
 		}
 	}()
 

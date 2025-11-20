@@ -25,6 +25,10 @@ func Run(addr *string, collectionInterval *time.Duration, devices Devices) error
 		return fmt.Errorf("failed to initialize gpu metrics: %w", err)
 	}
 
+	if err := initTopologyInfo(devices); err != nil {
+		log.Printf("failed to initialize topology metrics: %v", err)
+	}
+
 	// Start fabric health collector
 	startCollectors(devices, *collectionInterval)
 
