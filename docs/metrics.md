@@ -15,8 +15,8 @@ and are set to `1`. Use the labels to join against other metrics in Prometheus.
 | `nvgpu_fabric_incorrect_configuration` | Gauge | `UUID`, `pci_bus_id`, `clique_id`, `cluster_uuid` | Incorrect configuration bits extracted from the health mask (0 = not supported, 1 = none, other values follow NVML docs). |
 | `nvgpu_nvlink_errors_total` | Gauge | `UUID`, `pci_bus_id`, `link`, `error_type` | GB200 NVLink counters per link, covering malformed packets, buffer overruns, BER values, and 16 FEC history buckets. |
 | `nvgpu_clocks_event_duration_nanoseconds_total` | Gauge | `UUID`, `pci_bus_id`, `reason` | Accumulated throttling time (nanoseconds) for key NVML clock event reasons (SW power capping, Sync Boost, SW/HW thermal, HW power brake). |
-| `nvgpu_gpu_topology_info` | Gauge | `UUID`, `name`, `gpu0-3`, `nic0-5`, `cpu_affinity`, `numa_affinity`, `gpu_numa_id` | GPU-to-GPU/CPU layout akin to `nvidia-smi topo -m`, refreshed each collection interval. |
-| `nvgpu_nic_topology_info` | Gauge | `name`, `gpu0-3`, `nic0-5` | Placeholder topology info for NIC rows (NVML lacks direct NIC details; values currently `unknown`). |
+| `nvgpu_gpu_topology_info` | Gauge | `UUID`, `name`, `gpu0-3`, `nic0-5`, `cpu_affinity`, `numa_affinity`, `gpu_numa_id` | Full `nvidia-smi topo -m` style row for each GPU with NVLink counts (NV#), NODE/SYS labels, and CPU/NUMA affinities. |
+| `nvgpu_nic_topology_info` | Gauge | `name`, `gpu0-3`, `nic0-5` | Topology rows for NVLink-connected NICs/NVSwitches showing NODE/SYS relationships and the NIC self-column. |
 | `nvgpu_xid_errors_total` | Counter | `UUID`, `pci_bus_id`, `xid` | Total NVML Xid critical errors seen since exporter start. |
 
 ## Fabric health fields

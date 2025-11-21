@@ -105,22 +105,23 @@ func formatCpuAffinity(cpus []uint) string {
 }
 
 // getNVLinkConnection returns the NVLink connection type (e.g., "NV18") or empty string
-func getNVLinkConnection(device1, device2 nvml.Device) string {
+func getNVLinkConnection(device1, device2 nvml.Device, pciInfo2 nvml.PciInfo) string {
 	// Get NVLink connection count between two devices
 	count := 0
 	for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
+		// Check if link is active first
+		state, ret := device1.GetNvLinkState(link)
+		if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
+			continue
+		}
+
+		// Get remote device PCI info for this link
 		remoteInfo, ret := device1.GetNvLinkRemotePciInfo(link)
 		if !errors.Is(ret, nvml.SUCCESS) {
 			continue
 		}
 
-		// Get PCI info for device2 to compare
-		pciInfo2, ret := device2.GetPciInfo()
-		if !errors.Is(ret, nvml.SUCCESS) {
-			continue
-		}
-
-		// Check if this link connects to device2
+		// Check if this link connects to device2 by comparing PCI addresses
 		if remoteInfo.Domain == pciInfo2.Domain &&
 			remoteInfo.Bus == pciInfo2.Bus &&
 			remoteInfo.Device == pciInfo2.Device {
@@ -201,8 +202,8 @@ func collectTopologyMetrics(devices []nvml.Device) {
 			if i == j {
 				connection = "X" // Self
 			} else {
-				// Check for NVLink connection first
-				nvlinkConn := getNVLinkConnection(device1, device2)
+				// Check for NVLink connection first using cached PCI info
+				nvlinkConn := getNVLinkConnection(device1, device2, info2.pciInfo)
 				if nvlinkConn != "" {
 					connection = nvlinkConn
 				} else {
