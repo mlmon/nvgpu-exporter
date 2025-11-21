@@ -62,6 +62,13 @@ func initTopologyInfo(devices Devices, infos []*GpuInfo) error {
 
 func collectGpuTopologyInfo(devices Devices, infos []*GpuInfo) error {
 	numCPUs := runtime.NumCPU()
+	pciIndex := map[string]int{}
+	for idx, info := range infos {
+		key := fmt.Sprintf("%04x:%02x:%02x", info.PciDomain, info.PciBus, info.PciDevice)
+		pciIndex[key] = idx
+	}
+
+	nicList, nvlinkCounts := discoverNvlinkPeers(devices, pciIndex)
 	type topoKey struct {
 		a int
 		b int
@@ -71,6 +78,9 @@ func collectGpuTopologyInfo(devices Devices, infos []*GpuInfo) error {
 	getTopologyLabel := func(a, b int) string {
 		if a == b {
 			return "X"
+		}
+		if count := nvlinkCounts[a][b]; count > 0 {
+			return fmt.Sprintf("NV%d", count)
 		}
 		key := topoKey{a: min(a, b), b: max(a, b)}
 		if val, ok := topologyCache[key]; ok {
@@ -85,16 +95,9 @@ func collectGpuTopologyInfo(devices Devices, infos []*GpuInfo) error {
 		return label
 	}
 
-	nicList := discoverNicLinks(devices)
-
 	for i := range devices {
-		info, err := devices.GpuInfo(i)
-		if err != nil {
-			return err
-		}
-
 		labels := prometheus.Labels{
-			"UUID": info.UUID,
+			"UUID": infos[i].UUID,
 			"name": fmt.Sprintf("gpu%d", i),
 		}
 
@@ -204,7 +207,12 @@ func formatRange(start, end int) string {
 	return fmt.Sprintf("%d-%d", start, end)
 }
 
-func discoverNicLinks(devices Devices) []*nicInfo {
+func discoverNvlinkPeers(devices Devices, pciIndex map[string]int) ([]*nicInfo, [][]int) {
+	nvlinkCounts := make([][]int, len(devices))
+	for i := range nvlinkCounts {
+		nvlinkCounts[i] = make([]int, len(devices))
+	}
+
 	nicByKey := make(map[string]*nicInfo)
 	var nicList []*nicInfo
 
@@ -216,7 +224,7 @@ func discoverNicLinks(devices Devices) []*nicInfo {
 			}
 
 			remoteType, ret := devices[i].GetNvLinkRemoteDeviceType(link)
-			if !errors.Is(ret, nvml.SUCCESS) || remoteType != nvml.NVLINK_DEVICE_TYPE_IBMNPU {
+			if !errors.Is(ret, nvml.SUCCESS) {
 				continue
 			}
 
@@ -225,25 +233,34 @@ func discoverNicLinks(devices Devices) []*nicInfo {
 				continue
 			}
 
-			pciKey := pciBusIdToString(remotePci.BusIdLegacy)
-			nic := nicByKey[pciKey]
-			if nic == nil {
-				if len(nicList) >= len(nicLabelKeys) {
-					continue
+			switch remoteType {
+			case nvml.NVLINK_DEVICE_TYPE_GPU:
+				key := fmt.Sprintf("%04x:%02x:%02x", remotePci.Domain, remotePci.Bus, remotePci.Device)
+				if j, ok := pciIndex[key]; ok {
+					nvlinkCounts[i][j]++
+					nvlinkCounts[j][i]++
 				}
-				nic = &nicInfo{
-					label:       nicLabelKeys[len(nicList)],
-					pciKey:      pciKey,
-					connections: make(map[int]struct{}),
+			case nvml.NVLINK_DEVICE_TYPE_IBMNPU, nvml.NVLINK_DEVICE_TYPE_SWITCH:
+				pciKey := fmt.Sprintf("%04x:%02x:%02x", remotePci.Domain, remotePci.Bus, remotePci.Device)
+				nic := nicByKey[pciKey]
+				if nic == nil {
+					if len(nicList) >= len(nicLabelKeys) {
+						continue
+					}
+					nic = &nicInfo{
+						label:       nicLabelKeys[len(nicList)],
+						pciKey:      pciKey,
+						connections: make(map[int]struct{}),
+					}
+					nicByKey[pciKey] = nic
+					nicList = append(nicList, nic)
 				}
-				nicByKey[pciKey] = nic
-				nicList = append(nicList, nic)
+				nic.connections[i] = struct{}{}
 			}
-			nic.connections[i] = struct{}{}
 		}
 	}
 
-	return nicList
+	return nicList, nvlinkCounts
 }
 
 func recordNicTopology(nicList []*nicInfo, gpuCount int) {

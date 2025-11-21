@@ -12,6 +12,9 @@ import (
 type GpuInfo struct {
 	UUID                string
 	PciBusId            string
+	PciDomain           uint32
+	PciBus              uint32
+	PciDevice           uint32
 	Name                string
 	Brand               string
 	Serial              string

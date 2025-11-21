@@ -93,6 +93,9 @@ func (d Devices) GpuInfo(i int) (*GpuInfo, error) {
 		return nil, fmt.Errorf("failed to get PCI info: %v", nvml.ErrorString(ret))
 	}
 	info.PciBusId = pciBusIdToString(pciInfo.BusIdLegacy)
+	info.PciDomain = pciInfo.Domain
+	info.PciBus = uint32(pciInfo.Bus)
+	info.PciDevice = uint32(pciInfo.Device)
 
 	// Get name
 	name, ret := device.GetName()
