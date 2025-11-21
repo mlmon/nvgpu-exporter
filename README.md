@@ -70,8 +70,8 @@ source hints, is available in [`docs/metrics.md`](docs/metrics.md). Highlights:
   and FEC history values when supported by the hardware.
 - `clocks_event_duration_cumulative_total`: cumulative time GPUs spent
   throttled for each NVML clock event reason.
-- `nvgpu_gpu_topology_info` / `nvgpu_nic_topology_info`: GPU↔GPU, GPU↔NIC, and
-  CPU affinity depicting the `nvidia-smi topo -m` matrix (NVLink counts, NODE/SYS).
+- `nvgpu_gpu_topology_info` / `nvgpu_nic_topology_info`: GPU-to-GPU/CPU/NIC
+  relationships derived from NVML topology calls (similar to `nvidia-smi topo -m`).
 - `nvgpu_xid_errors_total`: cumulative count of NVML Xid errors by code.
 
 ## Scaling guidance
@@ -86,11 +86,11 @@ GPUs (HV/HGX B200):
 - NVLink errors: GB200 exposes up to 18 links per GPU. With ~30 counters per
   link that’s ~2,160 series per host.
 - Clock-event durations: 4 GPUs × 5 reasons = 20 series.
-- Topology info: one series per GPU plus one per NVLink-connected NIC (≈8–10 series).
+- Topology info: one series per GPU plus a NIC placeholder (~5 series).
 - Xid counters: sparse, but plan for a few dozen series depending on error
   variety.
 
-Overall, expect roughly 2.6–3.1k time-series per GB200 host when all collectors
+Overall, expect roughly 2.5–3k time-series per GB200 host when all collectors
 are enabled. Scale Prometheus accordingly (scrape interval, retention, remote
 write, etc.), and consider disabling NVLink field collection or reducing the
 frequency if you are monitoring hundreds of nodes.
