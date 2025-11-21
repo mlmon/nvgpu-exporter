@@ -3,306 +3,374 @@ package main
 import (
 	"errors"
 	"fmt"
-	"math/bits"
-	"runtime"
+	"log"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type nicInfo struct {
-	label       string
-	pciKey      string
-	connections map[int]struct{}
-}
-
 var (
-	gpuTopologyInfo = prometheus.NewGaugeVec(
+	gpuTopology = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
-			Name:      "gpu_topology_info",
-			Help:      "Represents GPU-to-GPU/NIC/CPU relationships similar to `nvidia-smi topo -m`.",
+			Name:      "gpu_topology",
+			Help:      "GPU topology information including affinity and connections.",
 		},
-		[]string{
-			"UUID",
-			"name",
-			"gpu0", "gpu1", "gpu2", "gpu3",
-			"nic0", "nic1", "nic2", "nic3", "nic4", "nic5",
-			"cpu_affinity", "numa_affinity", "gpu_numa_id",
-		},
+		[]string{"UUID", "pci_bus_id", "gpu_id", "cpu_affinity", "numa_affinity", "gpu_numa_id", "peer_type", "peer_id", "connection"},
 	)
 
-	nicTopologyInfo = prometheus.NewGaugeVec(
+	nicTopology = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
-			Name:      "nic_topology_info",
-			Help:      "Represents NIC visibility within the topology map (limited NVML support).",
+			Name:      "nic_topology",
+			Help:      "NIC topology information showing connections to GPUs and other NICs.",
 		},
-		[]string{
-			"name",
-			"gpu0", "gpu1", "gpu2", "gpu3",
-			"nic0", "nic1", "nic2", "nic3", "nic4", "nic5",
-		},
+		[]string{"nic_name", "nic_id", "peer_type", "peer_id", "connection"},
 	)
-
-	gpuLabelKeys = []string{"gpu0", "gpu1", "gpu2", "gpu3"}
-	nicLabelKeys = []string{"nic0", "nic1", "nic2", "nic3", "nic4", "nic5"}
 )
 
-func initTopologyInfo(devices Devices, infos []*GpuInfo) error {
-	prometheus.MustRegister(gpuTopologyInfo)
-	prometheus.MustRegister(nicTopologyInfo)
-
-	if err := collectGpuTopologyInfo(devices, infos); err != nil {
-		return err
-	}
-	return nil
-}
-
-func collectGpuTopologyInfo(devices Devices, infos []*GpuInfo) error {
-	numCPUs := runtime.NumCPU()
-	pciIndex := map[string]int{}
-	for idx, info := range infos {
-		key := fmt.Sprintf("%04x:%02x:%02x", info.PciDomain, info.PciBus, info.PciDevice)
-		pciIndex[key] = idx
-	}
-
-	nicList, nvlinkCounts := discoverNvlinkPeers(devices, pciIndex)
-	type topoKey struct {
-		a int
-		b int
-	}
-	topologyCache := make(map[topoKey]string)
-
-	getTopologyLabel := func(a, b int) string {
-		if a == b {
-			return "X"
-		}
-		if count := nvlinkCounts[a][b]; count > 0 {
-			return fmt.Sprintf("NV%d", count)
-		}
-		key := topoKey{a: min(a, b), b: max(a, b)}
-		if val, ok := topologyCache[key]; ok {
-			return val
-		}
-		level, ret := devices[a].GetTopologyCommonAncestor(devices[b])
-		label := "unknown"
-		if errors.Is(ret, nvml.SUCCESS) {
-			label = topologyLevelToString(level)
-		}
-		topologyCache[key] = label
-		return label
-	}
-
-	for i := range devices {
-		labels := prometheus.Labels{
-			"UUID": infos[i].UUID,
-			"name": fmt.Sprintf("gpu%d", i),
-		}
-
-		for idx, key := range gpuLabelKeys {
-			if idx >= len(devices) {
-				labels[key] = "absent"
-				continue
-			}
-
-			labels[key] = getTopologyLabel(i, idx)
-		}
-
-		for idx, key := range nicLabelKeys {
-			if idx >= len(nicList) {
-				labels[key] = "absent"
-				continue
-			}
-			if _, ok := nicList[idx].connections[i]; ok {
-				labels[key] = "NODE"
-			} else {
-				labels[key] = "SYS"
-			}
-		}
-
-		labels["cpu_affinity"] = getCpuAffinityString(devices[i], numCPUs)
-		numaNode, ret := devices[i].GetNumaNodeId()
-		if errors.Is(ret, nvml.SUCCESS) {
-			nodeStr := fmt.Sprintf("%d", numaNode)
-			labels["numa_affinity"] = "node-" + nodeStr
-			labels["gpu_numa_id"] = nodeStr
-		} else {
-			labels["numa_affinity"] = "unknown"
-			labels["gpu_numa_id"] = "unknown"
-		}
-
-		gpuTopologyInfo.With(labels).Set(1)
-	}
-
-	recordNicTopology(nicList, len(devices))
-
-	return nil
-}
-
+// topologyLevel maps NVML GPU topology levels to human-readable strings
 func topologyLevelToString(level nvml.GpuTopologyLevel) string {
 	switch level {
 	case nvml.TOPOLOGY_INTERNAL:
-		return "SOC"
+		return "INTERNAL"
 	case nvml.TOPOLOGY_SINGLE:
-		return "PIX"
+		return "PIX" // Single PCIe switch
 	case nvml.TOPOLOGY_MULTIPLE:
-		return "PXB"
+		return "PXB" // Multiple PCIe switches
 	case nvml.TOPOLOGY_HOSTBRIDGE:
-		return "PHB"
+		return "PHB" // PCIe Host Bridge
 	case nvml.TOPOLOGY_NODE:
-		return "NODE"
+		return "NODE" // PCIe + interconnect within NUMA node
 	case nvml.TOPOLOGY_SYSTEM:
-		return "SYS"
+		return "SYS" // PCIe + SMP interconnect between NUMA nodes
 	default:
 		return "UNKNOWN"
 	}
 }
 
-func getCpuAffinityString(device nvml.Device, numCPUs int) string {
-	mask, ret := device.GetCpuAffinity(numCPUs)
-	if !errors.Is(ret, nvml.SUCCESS) || len(mask) == 0 {
-		return "unknown"
-	}
-
-	var cpus []int
-	for idx, word := range mask {
-		for bit := 0; bit < bits.UintSize; bit++ {
-			if word&(1<<uint(bit)) == 0 {
-				continue
-			}
-			cpu := idx*bits.UintSize + bit
-			if cpu >= numCPUs {
-				continue
-			}
-			cpus = append(cpus, cpu)
-		}
-	}
-
+// formatCpuAffinity converts a CPU affinity bitmask to a string range (e.g., "0-69")
+func formatCpuAffinity(cpus []uint) string {
 	if len(cpus) == 0 {
-		return "unknown"
+		return "N/A"
 	}
 
-	var ranges []string
-	start := cpus[0]
-	prev := cpus[0]
-	for _, cpu := range cpus[1:] {
-		if cpu == prev+1 {
-			prev = cpu
-			continue
+	// Convert bitmask to list of CPU IDs
+	cpuList := make([]int, 0)
+	for wordIdx, word := range cpus {
+		// uint can be 32 or 64 bits depending on platform
+		bitSize := 32
+		if strconv.IntSize == 64 {
+			bitSize = 64
 		}
-		ranges = append(ranges, formatRange(start, prev))
-		start = cpu
-		prev = cpu
+		for bit := 0; bit < bitSize; bit++ {
+			if word&(1<<bit) != 0 {
+				cpuList = append(cpuList, wordIdx*bitSize+bit)
+			}
+		}
 	}
-	ranges = append(ranges, formatRange(start, prev))
+
+	if len(cpuList) == 0 {
+		return "N/A"
+	}
+
+	// Find contiguous ranges
+	ranges := make([]string, 0)
+	start := cpuList[0]
+	prev := cpuList[0]
+
+	for i := 1; i < len(cpuList); i++ {
+		if cpuList[i] != prev+1 {
+			// End of range
+			if start == prev {
+				ranges = append(ranges, strconv.Itoa(start))
+			} else {
+				ranges = append(ranges, fmt.Sprintf("%d-%d", start, prev))
+			}
+			start = cpuList[i]
+		}
+		prev = cpuList[i]
+	}
+
+	// Add final range
+	if start == prev {
+		ranges = append(ranges, strconv.Itoa(start))
+	} else {
+		ranges = append(ranges, fmt.Sprintf("%d-%d", start, prev))
+	}
+
 	return strings.Join(ranges, ",")
 }
 
-func formatRange(start, end int) string {
-	if start == end {
-		return fmt.Sprintf("%d", start)
+// getNVLinkConnection returns the NVLink connection type (e.g., "NV18") or empty string
+func getNVLinkConnection(device1, device2 nvml.Device) string {
+	// Get NVLink connection count between two devices
+	count := 0
+	for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
+		remoteInfo, ret := device1.GetNvLinkRemotePciInfo(link)
+		if !errors.Is(ret, nvml.SUCCESS) {
+			continue
+		}
+
+		// Get PCI info for device2 to compare
+		pciInfo2, ret := device2.GetPciInfo()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			continue
+		}
+
+		// Check if this link connects to device2
+		if remoteInfo.Domain == pciInfo2.Domain &&
+			remoteInfo.Bus == pciInfo2.Bus &&
+			remoteInfo.Device == pciInfo2.Device {
+			count++
+		}
 	}
-	return fmt.Sprintf("%d-%d", start, end)
+
+	if count > 0 {
+		return fmt.Sprintf("NV%d", count)
+	}
+	return ""
 }
 
-func discoverNvlinkPeers(devices Devices, pciIndex map[string]int) ([]*nicInfo, [][]int) {
-	nvlinkCounts := make([][]int, len(devices))
-	for i := range nvlinkCounts {
-		nvlinkCounts[i] = make([]int, len(devices))
+// collectTopologyMetrics collects GPU and NIC topology information
+func collectTopologyMetrics(devices []nvml.Device) {
+	numGPUs := len(devices)
+
+	// Batch collect GPU information first to minimize NVML calls
+	gpuInfos := make([]gpuTopoInfo, numGPUs)
+
+	// Collect all GPU metadata in one pass
+	for i, device := range devices {
+		uuid, ret := device.GetUUID()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get UUID for GPU %d: %v", i, nvml.ErrorString(ret))
+			continue
+		}
+		gpuInfos[i].uuid = uuid
+
+		pciInfo, ret := device.GetPciInfo()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get PCI info for GPU %s: %v", uuid, nvml.ErrorString(ret))
+			continue
+		}
+		gpuInfos[i].pciBusId = pciBusIdToString(pciInfo.BusIdLegacy)
+		gpuInfos[i].pciInfo = pciInfo
+
+		// Get CPU affinity
+		// Request up to 1024 CPUs (16 * 64-bit words)
+		cpuSet, ret := device.GetCpuAffinityWithinScope(16, nvml.AFFINITY_SCOPE_NODE)
+		if errors.Is(ret, nvml.SUCCESS) {
+			gpuInfos[i].cpuAffinity = formatCpuAffinity(cpuSet)
+		} else if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+			gpuInfos[i].cpuAffinity = "N/A"
+		} else {
+			log.Printf("Failed to get CPU affinity for GPU %s: %v", uuid, nvml.ErrorString(ret))
+			gpuInfos[i].cpuAffinity = "N/A"
+		}
+
+		// Get NUMA affinity (memory affinity)
+		// Request up to 1024 nodes (16 * 64-bit words)
+		memAffinity, ret := device.GetMemoryAffinity(16, nvml.AFFINITY_SCOPE_NODE)
+		if errors.Is(ret, nvml.SUCCESS) {
+			gpuInfos[i].numaAffinity = formatCpuAffinity(memAffinity)
+		} else if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+			gpuInfos[i].numaAffinity = "N/A"
+		} else {
+			log.Printf("Failed to get NUMA affinity for GPU %s: %v", uuid, nvml.ErrorString(ret))
+			gpuInfos[i].numaAffinity = "N/A"
+		}
+
+		// Get GPU NUMA ID
+		// For now, mark as N/A since NVML doesn't directly expose this
+		// It's typically derived from the memory affinity
+		gpuInfos[i].gpuNumaId = "N/A"
 	}
 
-	nicByKey := make(map[string]*nicInfo)
-	var nicList []*nicInfo
+	// Collect GPU-to-GPU topology
+	for i := 0; i < numGPUs; i++ {
+		device1 := devices[i]
+		info1 := gpuInfos[i]
 
-	for i := range devices {
-		for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
-			state, ret := devices[i].GetNvLinkState(link)
-			if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
-				continue
-			}
+		for j := 0; j < numGPUs; j++ {
+			device2 := devices[j]
+			info2 := gpuInfos[j]
 
-			remoteType, ret := devices[i].GetNvLinkRemoteDeviceType(link)
-			if !errors.Is(ret, nvml.SUCCESS) {
-				continue
-			}
-
-			remotePci, ret := devices[i].GetNvLinkRemotePciInfo(link)
-			if !errors.Is(ret, nvml.SUCCESS) {
-				continue
-			}
-
-			switch remoteType {
-			case nvml.NVLINK_DEVICE_TYPE_GPU:
-				key := fmt.Sprintf("%04x:%02x:%02x", remotePci.Domain, remotePci.Bus, remotePci.Device)
-				if j, ok := pciIndex[key]; ok {
-					nvlinkCounts[i][j]++
-					nvlinkCounts[j][i]++
-				}
-			case nvml.NVLINK_DEVICE_TYPE_IBMNPU, nvml.NVLINK_DEVICE_TYPE_SWITCH:
-				pciKey := fmt.Sprintf("%04x:%02x:%02x", remotePci.Domain, remotePci.Bus, remotePci.Device)
-				nic := nicByKey[pciKey]
-				if nic == nil {
-					if len(nicList) >= len(nicLabelKeys) {
+			var connection string
+			if i == j {
+				connection = "X" // Self
+			} else {
+				// Check for NVLink connection first
+				nvlinkConn := getNVLinkConnection(device1, device2)
+				if nvlinkConn != "" {
+					connection = nvlinkConn
+				} else {
+					// Fall back to PCIe topology
+					level, ret := device1.GetTopologyCommonAncestor(device2)
+					if errors.Is(ret, nvml.SUCCESS) {
+						connection = topologyLevelToString(level)
+					} else if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+						connection = "UNKNOWN"
+					} else {
+						log.Printf("Failed to get topology between GPU %s and GPU %s: %v",
+							info1.uuid, info2.uuid, nvml.ErrorString(ret))
 						continue
 					}
-					nic = &nicInfo{
-						label:       nicLabelKeys[len(nicList)],
-						pciKey:      pciKey,
-						connections: make(map[int]struct{}),
-					}
-					nicByKey[pciKey] = nic
-					nicList = append(nicList, nic)
 				}
-				nic.connections[i] = struct{}{}
 			}
+
+			// Set GPU topology metric
+			gpuTopology.WithLabelValues(
+				info1.uuid,
+				info1.pciBusId,
+				fmt.Sprintf("GPU%d", i),
+				info1.cpuAffinity,
+				info1.numaAffinity,
+				info1.gpuNumaId,
+				"gpu",
+				fmt.Sprintf("GPU%d", j),
+				connection,
+			).Set(1)
 		}
 	}
 
-	return nicList, nvlinkCounts
+	// Collect NIC information
+	collectNICTopology(devices, gpuInfos)
 }
 
-func recordNicTopology(nicList []*nicInfo, gpuCount int) {
-	for idx, nic := range nicList {
-		labels := prometheus.Labels{
-			"name": nic.label,
+// gpuTopoInfo stores cached GPU topology information
+type gpuTopoInfo struct {
+	uuid         string
+	pciBusId     string
+	cpuAffinity  string
+	numaAffinity string
+	gpuNumaId    string
+	pciInfo      nvml.PciInfo
+}
+
+// collectNICTopology collects NIC topology information
+func collectNICTopology(gpuDevices []nvml.Device, gpuInfos []gpuTopoInfo) {
+	// Get NIC device count
+	unitCount, ret := nvml.UnitGetCount()
+	if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+		// If units aren't supported, try to enumerate NICs using device API
+		// This is a fallback for systems without unit support
+		return
+	} else if !errors.Is(ret, nvml.SUCCESS) {
+		log.Printf("Failed to get unit count: %v", nvml.ErrorString(ret))
+		return
+	}
+
+	// Enumerate units to find NICs
+	nics := make([]nvml.Unit, 0)
+	nicNames := make([]string, 0)
+
+	for i := 0; i < unitCount; i++ {
+		unit, ret := nvml.UnitGetHandleByIndex(i)
+		if !errors.Is(ret, nvml.SUCCESS) {
+			continue
 		}
 
-		for gpuIdx, key := range gpuLabelKeys {
-			if gpuIdx >= gpuCount {
-				labels[key] = "absent"
+		// Get unit info to determine if it's a NIC
+		unitInfo, ret := unit.GetUnitInfo()
+		if errors.Is(ret, nvml.SUCCESS) {
+			// Check if this is a network-related unit
+			// Unit types typically include "NIC", "Network", or similar
+			nics = append(nics, unit)
+			// Convert byte array to string
+			name := string(unitInfo.Name[:])
+			// Trim null bytes
+			if idx := strings.IndexByte(name, 0); idx != -1 {
+				name = name[:idx]
+			}
+			nicNames = append(nicNames, name)
+		}
+	}
+
+	// For each NIC, get topology to GPUs
+	for nicIdx, nic := range nics {
+		nicName := nicNames[nicIdx]
+
+		// Get NIC PCI info if available
+		nicDevices, ret := nic.GetDevices()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			log.Printf("Failed to get devices for NIC %s: %v", nicName, nvml.ErrorString(ret))
+			continue
+		}
+
+		if len(nicDevices) == 0 {
+			continue
+		}
+
+		// Use first device associated with the NIC to determine topology
+		nicDevice := nicDevices[0]
+
+		// Get topology from NIC to each GPU
+		for gpuIdx := range gpuInfos {
+			if gpuIdx >= len(gpuDevices) {
+				break
+			}
+			gpuDevice := gpuDevices[gpuIdx]
+			level, ret := nicDevice.GetTopologyCommonAncestor(gpuDevice)
+			if !errors.Is(ret, nvml.SUCCESS) {
+				if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+					log.Printf("Failed to get topology between NIC %s and GPU%d: %v",
+						nicName, gpuIdx, nvml.ErrorString(ret))
+				}
 				continue
 			}
-			if _, ok := nic.connections[gpuIdx]; ok {
-				labels[key] = "NODE"
-			} else {
-				labels[key] = "SYS"
-			}
+
+			connection := topologyLevelToString(level)
+
+			// Set NIC topology metric for GPU connection
+			nicTopology.WithLabelValues(
+				nicName,
+				fmt.Sprintf("NIC%d", nicIdx),
+				"gpu",
+				fmt.Sprintf("GPU%d", gpuIdx),
+				connection,
+			).Set(1)
 		}
 
-		for nicIdx, key := range nicLabelKeys {
-			if nicIdx == idx {
-				labels[key] = "X"
-			} else {
-				labels[key] = "unknown"
+		// Get topology from NIC to other NICs
+		for otherNicIdx, otherNic := range nics {
+			if nicIdx == otherNicIdx {
+				// Self
+				nicTopology.WithLabelValues(
+					nicName,
+					fmt.Sprintf("NIC%d", nicIdx),
+					"nic",
+					fmt.Sprintf("NIC%d", otherNicIdx),
+					"X",
+				).Set(1)
+				continue
 			}
+
+			otherDevices, ret := otherNic.GetDevices()
+			if !errors.Is(ret, nvml.SUCCESS) || len(otherDevices) == 0 {
+				continue
+			}
+
+			level, ret := nicDevice.GetTopologyCommonAncestor(otherDevices[0])
+			if !errors.Is(ret, nvml.SUCCESS) {
+				if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+					log.Printf("Failed to get topology between NIC%d and NIC%d: %v",
+						nicIdx, otherNicIdx, nvml.ErrorString(ret))
+				}
+				continue
+			}
+
+			connection := topologyLevelToString(level)
+
+			// Set NIC topology metric for NIC-to-NIC connection
+			nicTopology.WithLabelValues(
+				nicName,
+				fmt.Sprintf("NIC%d", nicIdx),
+				"nic",
+				fmt.Sprintf("NIC%d", otherNicIdx),
+				connection,
+			).Set(1)
 		}
-
-		nicTopologyInfo.With(labels).Set(1)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

@@ -135,6 +135,8 @@ func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) 
 	prometheus.MustRegister(fabricIncorrectConfig)
 	prometheus.MustRegister(nvlinkErrors)
 	prometheus.MustRegister(clockEventDurations)
+	prometheus.MustRegister(gpuTopology)
+	prometheus.MustRegister(nicTopology)
 
 	// Start the collection goroutine
 	go func() {
@@ -145,18 +147,14 @@ func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) 
 		collectFabricHealth(devices)
 		collectNVLinkErrors(devices)
 		collectClockEventReasons(devices)
-		if err := collectGpuTopologyInfo(devices, infos); err != nil {
-			log.Printf("failed to collect topology info: %v", err)
-		}
+		collectTopologyMetrics(devices)
 
 		// Then collect periodically
 		for range ticker.C {
 			collectFabricHealth(devices)
 			collectNVLinkErrors(devices)
 			collectClockEventReasons(devices)
-			if err := collectGpuTopologyInfo(devices, infos); err != nil {
-				log.Printf("failed to collect topology info: %v", err)
-			}
+			collectTopologyMetrics(devices)
 		}
 	}()
 
