@@ -135,8 +135,8 @@ func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) 
 	prometheus.MustRegister(fabricIncorrectConfig)
 	prometheus.MustRegister(nvlinkErrors)
 	prometheus.MustRegister(clockEventDurations)
-	prometheus.MustRegister(gpuTopology)
-	prometheus.MustRegister(nicTopology)
+	//prometheus.MustRegister(gpuTopology)
+	// prometheus.MustRegister(nicTopology)
 
 	// Start the collection goroutine
 	go func() {
@@ -147,16 +147,16 @@ func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) 
 		collectFabricHealth(devices)
 		collectNVLinkErrors(devices)
 		collectClockEventReasons(devices)
-		collectTopologyMetrics(devices)
+		// collectTopologyMetrics(devices)
 
 		// Then collect periodically
 		for range ticker.C {
 			collectFabricHealth(devices)
 			collectNVLinkErrors(devices)
 			collectClockEventReasons(devices)
-			collectTopologyMetrics(devices)
+			// collectTopologyMetrics(devices)
 		}
 	}()
 
-	log.Printf("Started fabric health and NVLink error collector with interval: %v", interval)
+	log.Printf("Started collectors with interval of %v", interval)
 }
