@@ -50,6 +50,13 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 				EccInforomVersion:   "1.0",
 				PowerInforomVersion: "1.0",
 				InforomImageVersion: "1.0",
+				ChassisSerialNumber: "1820425190259",
+				SlotNumber:          "15",
+				TrayIndex:           "5",
+				HostId:              "1",
+				PeerType:            "Switch Connected",
+				ModuleId:            "2",
+				GpuFabricGuid:       "0xec9e1299856d0a6c",
 			},
 			{
 				UUID:                "GPU-2",
@@ -63,6 +70,13 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 				EccInforomVersion:   "1.1",
 				PowerInforomVersion: "1.1",
 				InforomImageVersion: "1.1",
+				ChassisSerialNumber: "1820425190259",
+				SlotNumber:          "16",
+				TrayIndex:           "6",
+				HostId:              "2",
+				PeerType:            "Direct Connected",
+				ModuleId:            "3",
+				GpuFabricGuid:       "0xec9e1299856d0a6d",
 			},
 		},
 	}
@@ -86,6 +100,13 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 			info.EccInforomVersion,
 			info.PowerInforomVersion,
 			info.InforomImageVersion,
+			info.ChassisSerialNumber,
+			info.SlotNumber,
+			info.TrayIndex,
+			info.HostId,
+			info.PeerType,
+			info.ModuleId,
+			info.GpuFabricGuid,
 		))
 		assert.Is(hammy.Number(value).EqualTo(1))
 	}

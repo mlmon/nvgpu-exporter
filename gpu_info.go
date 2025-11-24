@@ -24,6 +24,14 @@ type GpuInfo struct {
 	PowerInforomVersion string
 	VbiosVersion        string
 	InforomImageVersion string
+	// Platform Info fields
+	ChassisSerialNumber string
+	SlotNumber          string
+	TrayIndex           string
+	HostId              string
+	PeerType            string
+	ModuleId            string
+	GpuFabricGuid       string
 }
 
 // ExporterInfo stores driver/library versions exposed by the exporter.
@@ -68,7 +76,7 @@ var gpuInfo = prometheus.NewGaugeVec(
 		Name:      "gpu_info",
 		Help:      "GPU device information.",
 	},
-	[]string{"UUID", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version"},
+	[]string{"UUID", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version", "chassis_serial_number", "slot_number", "tray_index", "host_id", "peer_type", "module_id", "gpu_fabric_guid"},
 )
 
 func initExporterInfo(devices DeviceLister, version string, commit string) error {
@@ -116,6 +124,13 @@ func initGpuInfoWithCache(infos []*GpuInfo) error {
 			info.EccInforomVersion,
 			info.PowerInforomVersion,
 			info.InforomImageVersion,
+			info.ChassisSerialNumber,
+			info.SlotNumber,
+			info.TrayIndex,
+			info.HostId,
+			info.PeerType,
+			info.ModuleId,
+			info.GpuFabricGuid,
 		).Set(1)
 	}
 

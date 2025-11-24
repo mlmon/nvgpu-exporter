@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
@@ -162,6 +163,57 @@ func (d Devices) GpuInfo(i int) (*GpuInfo, error) {
 		return nil, fmt.Errorf("failed to get InfoROM image version: %v", nvml.ErrorString(ret))
 	}
 	info.InforomImageVersion = imageVersion
+
+	// Get Platform Info fields
+	platformInfo, ret := device.GetPlatformInfo()
+	if errors.Is(ret, nvml.SUCCESS) {
+		// Convert chassis serial number from byte array to string
+		chassisSerial := string(platformInfo.ChassisSerialNumber[:])
+		if idx := strings.IndexByte(chassisSerial, 0); idx != -1 {
+			chassisSerial = chassisSerial[:idx]
+		}
+		info.ChassisSerialNumber = chassisSerial
+
+		info.SlotNumber = fmt.Sprintf("%d", platformInfo.SlotNumber)
+		info.TrayIndex = fmt.Sprintf("%d", platformInfo.TrayIndex)
+		info.HostId = fmt.Sprintf("%d", platformInfo.HostId)
+		info.ModuleId = fmt.Sprintf("%d", platformInfo.ModuleId)
+
+		// Map peer type to string
+		switch platformInfo.PeerType {
+		case 0:
+			info.PeerType = "Switch Connected"
+		case 1:
+			info.PeerType = "Direct Connected"
+		default:
+			info.PeerType = fmt.Sprintf("Unknown (%d)", platformInfo.PeerType)
+		}
+	} else if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
+		// Platform info not supported on this system
+		info.ChassisSerialNumber = "unknown"
+		info.SlotNumber = "unknown"
+		info.TrayIndex = "unknown"
+		info.HostId = "unknown"
+		info.PeerType = "unknown"
+		info.ModuleId = "unknown"
+	} else {
+		log.Printf("Failed to get platform info: %v", nvml.ErrorString(ret))
+		info.ChassisSerialNumber = "unknown"
+		info.SlotNumber = "unknown"
+		info.TrayIndex = "unknown"
+		info.HostId = "unknown"
+		info.PeerType = "unknown"
+		info.ModuleId = "unknown"
+	}
+
+	// Get GPU Fabric Info for GUID
+	fabricInfo, ret := device.GetGpuFabricInfoV().V2()
+	if errors.Is(ret, nvml.SUCCESS) {
+		// Convert ClusterUUID (which is the fabric GUID) to string
+		info.GpuFabricGuid = uuidBytesToString(fabricInfo.ClusterUuid)
+	} else {
+		info.GpuFabricGuid = "unknown"
+	}
 
 	return info, nil
 }
