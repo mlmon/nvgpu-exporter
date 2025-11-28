@@ -24,6 +24,7 @@ type GpuInfo struct {
 	PowerInforomVersion string
 	VbiosVersion        string
 	InforomImageVersion string
+	IbGuid              string
 	// Platform Info fields
 	ChassisSerialNumber string
 	SlotNumber          string
@@ -31,6 +32,10 @@ type GpuInfo struct {
 	HostId              string
 	PeerType            string
 	ModuleId            string
+	RackGuid            string
+	ChassisPhysicalSlot string
+	ComputeSlotIndex    string
+	NodeIndex           string
 	GpuFabricGuid       string
 }
 
