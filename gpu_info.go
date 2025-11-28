@@ -156,18 +156,20 @@ func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo, 
 	prometheus.MustRegister(nvlinkErrors)
 	prometheus.MustRegister(clockEventDurations)
 
+	clockCollector := newClockEventCollector()
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		collectFabricHealth(devices, logger)
 		collectNVLinkErrors(devices, logger)
-		collectClockEventReasons(devices, logger)
+		clockCollector.collectClockEventReasons(devices, logger)
 
 		for range ticker.C {
 			collectFabricHealth(devices, logger)
 			collectNVLinkErrors(devices, logger)
-			collectClockEventReasons(devices, logger)
+			clockCollector.collectClockEventReasons(devices, logger)
 		}
 	}()
 

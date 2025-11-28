@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"log/slog"
+	"sync"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,7 +31,26 @@ var (
 	}
 )
 
-func collectClockEventReasons(devices []nvml.Device, logger *slog.Logger) {
+type clockEventCollector struct {
+	mu         sync.Mutex
+	logCounter map[string]int
+	iterations int
+}
+
+func newClockEventCollector() *clockEventCollector {
+	return &clockEventCollector{
+		logCounter: make(map[string]int),
+	}
+}
+
+func (c *clockEventCollector) collectClockEventReasons(devices []nvml.Device, logger *slog.Logger) {
+	c.mu.Lock()
+	c.iterations++
+	if c.iterations%1440 == 0 {
+		c.logCounter = make(map[string]int)
+	}
+	c.mu.Unlock()
+
 	for _, device := range devices {
 		uuid, ret := device.GetUUID()
 		if !errors.Is(ret, nvml.SUCCESS) {
@@ -59,7 +79,9 @@ func collectClockEventReasons(devices []nvml.Device, logger *slog.Logger) {
 			fv := fieldValues[index[field.fieldID]]
 			if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
 				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
-					logger.Warn("clock event field unavailable", "reason", field.reason, "uuid", uuid, "error", nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
+					if c.shouldLogClockEventError(field.reason, uuid, nvml.Return(fv.NvmlReturn)) {
+						logger.Warn("clock event field unavailable", "reason", field.reason, "uuid", uuid, "error", nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
+					}
 				}
 				continue
 			}
@@ -85,6 +107,15 @@ func clockEventFieldValueToNanoseconds(fv nvml.FieldValue) (float64, error) {
 		return 0, err
 	}
 	return value, nil
+}
+
+func (c *clockEventCollector) shouldLogClockEventError(reason, uuid string, ret nvml.Return) bool {
+	c.mu.Lock()
+	key := reason + "|" + uuid + "|" + nvml.ErrorString(ret)
+	count := c.logCounter[key]
+	c.logCounter[key] = count + 1
+	c.mu.Unlock()
+	return count%60 == 0
 }
 
 func buildClockEventRequests() ([]nvml.FieldValue, map[uint32]int) {

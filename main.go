@@ -23,7 +23,7 @@ func main() {
 	collectionInterval := flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 
 	devices, shutdown, err := New(logger)
 	if err != nil {
