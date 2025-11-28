@@ -41,6 +41,9 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 			{
 				UUID:                "GPU-1",
 				PciBusId:            "0000:01:00.0",
+				PciDomain:           0,
+				PciBus:              1,
+				PciDevice:           0,
 				Name:                "H100",
 				Brand:               "1",
 				Serial:              "ABC123",
@@ -57,10 +60,18 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 				PeerType:            "Switch Connected",
 				ModuleId:            "2",
 				GpuFabricGuid:       "0xec9e1299856d0a6c",
+				IbGuid:              "f8c53a7b96de0001",
+				RackGuid:            "rack-guid-1",
+				ChassisPhysicalSlot: "chassis-slot-1",
+				ComputeSlotIndex:    "compute-slot-1",
+				NodeIndex:           "node-1",
 			},
 			{
 				UUID:                "GPU-2",
 				PciBusId:            "0000:02:00.0",
+				PciDomain:           0,
+				PciBus:              2,
+				PciDevice:           0,
 				Name:                "H100",
 				Brand:               "1",
 				Serial:              "XYZ987",
@@ -77,6 +88,11 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 				PeerType:            "Direct Connected",
 				ModuleId:            "3",
 				GpuFabricGuid:       "0xec9e1299856d0a6d",
+				IbGuid:              "f8c53a7b96de0002",
+				RackGuid:            "rack-guid-2",
+				ChassisPhysicalSlot: "chassis-slot-2",
+				ComputeSlotIndex:    "compute-slot-2",
+				NodeIndex:           "node-2",
 			},
 		},
 	}
@@ -91,6 +107,9 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 		value := testutil.ToFloat64(gpuInfo.WithLabelValues(
 			info.UUID,
 			info.PciBusId,
+			fmt.Sprintf("%d", info.PciDomain),
+			fmt.Sprintf("%d", info.PciBus),
+			fmt.Sprintf("%d", info.PciDevice),
 			info.Name,
 			info.Brand,
 			info.Serial,
@@ -107,6 +126,11 @@ func TestInitGpuInfoExportsAllDevices(t *testing.T) {
 			info.PeerType,
 			info.ModuleId,
 			info.GpuFabricGuid,
+			info.IbGuid,
+			info.RackGuid,
+			info.ChassisPhysicalSlot,
+			info.ComputeSlotIndex,
+			info.NodeIndex,
 		))
 		assert.Is(hammy.Number(value).EqualTo(1))
 	}

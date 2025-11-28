@@ -82,7 +82,7 @@ var gpuInfo = prometheus.NewGaugeVec(
 		Name:      "gpu_info",
 		Help:      "GPU device information.",
 	},
-	[]string{"UUID", "pci_bus_id", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version", "chassis_serial_number", "slot_number", "tray_index", "host_id", "peer_type", "module_id", "gpu_fabric_guid"},
+	[]string{"UUID", "pci_bus_id", "pci_domain", "pci_bus", "pci_device", "name", "brand", "serial", "board_id", "vbios_version", "oem_inforom_version", "ecc_inforom_version", "power_inforom_version", "inforom_image_version", "chassis_serial_number", "slot_number", "tray_index", "host_id", "peer_type", "module_id", "gpu_fabric_guid", "ib_guid", "rack_guid", "chassis_physical_slot", "compute_slot_index", "node_index"},
 )
 
 func initExporterInfo(devices DeviceLister, version string, commit string) error {
@@ -121,6 +121,9 @@ func initGpuInfoWithCache(infos []*GpuInfo) error {
 		gpuInfo.WithLabelValues(
 			info.UUID,
 			info.PciBusId,
+			fmt.Sprintf("%d", info.PciDomain),
+			fmt.Sprintf("%d", info.PciBus),
+			fmt.Sprintf("%d", info.PciDevice),
 			info.Name,
 			info.Brand,
 			info.Serial,
@@ -137,6 +140,11 @@ func initGpuInfoWithCache(infos []*GpuInfo) error {
 			info.PeerType,
 			info.ModuleId,
 			info.GpuFabricGuid,
+			info.IbGuid,
+			info.RackGuid,
+			info.ChassisPhysicalSlot,
+			info.ComputeSlotIndex,
+			info.NodeIndex,
 		).Set(1)
 	}
 

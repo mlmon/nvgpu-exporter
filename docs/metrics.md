@@ -12,7 +12,7 @@ and are set to `1`. Use the labels to join against other metrics in Prometheus.
 | Metric | Type | Labels | Notes |
 |--------|------|--------|-------|
 | `nvgpu_exporter_info` | Gauge | `version`, `driver_version`, `nvml_version`, `cuda_version` | Metadata about the running exporter and detected driver stack. |
-| `nvgpu_gpu_info` | Gauge | `UUID`, `pci_bus_id`, `name`, `brand`, `serial`, `board_id`, `vbios_version`, `oem_inforom_version`, `ecc_inforom_version`, `power_inforom_version`, `inforom_image_version` | Static GPU inventory attributes populated once on startup. |
+| `nvgpu_gpu_info` | Gauge | `UUID`, `pci_bus_id`, `pci_domain`, `pci_bus`, `pci_device`, `name`, `brand`, `serial`, `board_id`, `vbios_version`, `oem_inforom_version`, `ecc_inforom_version`, `power_inforom_version`, `inforom_image_version`, `chassis_serial_number`, `slot_number`, `tray_index`, `host_id`, `peer_type`, `module_id`, `gpu_fabric_guid`, `ib_guid`, `rack_guid`, `chassis_physical_slot`, `compute_slot_index`, `node_index` | Static GPU inventory attributes populated once on startup. Unsupported values are labeled as `unsupported` or `unknown`. |
 | `nvgpu_fabric_health` | Gauge | `UUID`, `pci_bus_id`, `clique_id`, `cluster_uuid`, `health_field` | Per-field fabric health flags decoded from the NVML health mask (`1` = healthy, `0` = unhealthy). |
 | `nvgpu_fabric_state` | Gauge | `UUID`, `pci_bus_id`, `clique_id`, `cluster_uuid` | Raw NVML fabric state enum (0 = not supported, 1 = not started, 2 = in progress, 3 = completed). |
 | `nvgpu_fabric_status` | Gauge | `UUID`, `pci_bus_id`, `clique_id`, `cluster_uuid` | NVML fabric status code reported by the device. |
