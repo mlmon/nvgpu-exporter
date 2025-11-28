@@ -30,3 +30,4 @@
 - Recent commits (`"Add PlatformInfo for chassis details"`, etc.) show the preferred short, imperative subject line—keep summaries under ~70 characters.
 - Reference related issues in the body, mention metric or file touch points, and describe any NVML prerequisite changes.
 - PRs should explain test coverage, include screenshots or sample `/metrics` output when user-visible changes exist, and call out Kubernetes manifest updates so reviewers can diff them carefully.
+- Commit automatically as you complete features.

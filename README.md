@@ -2,11 +2,10 @@
 
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/mlmon/nvgpu-exporter) [![Go Report Card](https://goreportcard.com/badge/github.com/mlmon/nvgpu-exporter)](https://goreportcard.com/report/github.com/mlmon/nvgpu-exporter) [![codecov](https://codecov.io/gh/mlmon/nvgpu-exporter/graph/badge.svg?token=2T2YXJGEJV)](https://codecov.io/gh/mlmon/nvgpu-exporter)
 
-nvgpu-exporter is a lightweight Prometheus exporter that surfaces detailed NVIDIA
-GPU information and health telemetry pulled directly from NVML. The exporter was
-built to make it easy to monitor fabric health on Hopper/Blackwell class GPUs,
-track NVLink error counters, and capture Xid events without needing a full
-DCGM stack.
+nvgpu-exporter is a lightweight Prometheus exporter that surfaces detailed
+NVIDIA GPU information and health telemetry pulled directly from NVML. The
+exporter focuses on fabric health for Hopper/Blackwell class GPUs, per-link
+NVLink error counters, and Xid events—without requiring a full DCGM stack.
 
 ## Features
 
@@ -41,10 +40,11 @@ go build -o nvgpu-exporter ./...
 sudo ./nvgpu-exporter -addr :9400 -collection-interval 30s
 ```
 
-If you prefer a container image, use `ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:latest`
-and run it with the NVIDIA Container Runtime so the container gains access to
-the NVML device nodes and driver libraries. The Kubernetes manifest under
-`k8s/daemonset.yaml` shows the required privileges, mounts, and tolerations.
+If you prefer a container image, use
+`ghcr.io/mlmon/nvgpu-exporter/nvgpu-exporter:latest` and run it with the NVIDIA
+Container Runtime so the container gains access to the NVML device nodes and
+driver libraries. The Kubernetes manifest under `k8s/daemonset.yaml` shows the
+required privileges, mounts, and tolerations.
 
 ## Configuration
 
@@ -56,6 +56,14 @@ the NVML device nodes and driver libraries. The Kubernetes manifest under
 The exporter registers event callbacks for Xid errors, so those metrics update as
 soon as NVML emits an event regardless of the collection interval. Inventory
 metrics are initialized on startup.
+
+## Running locally
+
+- Build from source with `go build -o nvgpu-exporter ./...`.
+- Start the exporter on a GPU host (or inside an NVIDIA Runtime container) with
+  `sudo ./nvgpu-exporter -addr :9400`.
+- Visit `http://localhost:9400/metrics` to confirm metrics are emitted. Driver
+  or NVML initialization failures will be logged to stderr.
 
 ## Metrics
 
@@ -71,6 +79,12 @@ source hints, is available in [`docs/metrics.md`](docs/metrics.md). Highlights:
 - `clocks_event_duration_cumulative_total`: cumulative time GPUs spent
   throttled for each NVML clock event reason.
 - `nvgpu_xid_errors_total`: cumulative count of NVML Xid errors by code.
+
+Example PromQL snippets:
+
+- Link errors that are still increasing: `rate(nvgpu_nvlink_errors_total[5m]) > 0`
+- Recent Xid occurrences per host: `increase(nvgpu_xid_errors_total[1h])`
+- Fabric health rollup: `max by (UUID) (nvgpu_fabric_health_summary)`
 
 ## Scaling guidance
 
@@ -100,13 +114,35 @@ privileged security context, device mounts, and tolerations. Adjust the
 namespace, image tag, or Prometheus scrape annotations as needed in your
 cluster.
 
+To deploy:
+
+```bash
+kubectl apply -f k8s/daemonset.yaml
+kubectl -n kube-system get pods -l app=nvgpu-exporter
+```
+
+Patch the DaemonSet if you need to change the image tag or disable service
+account automounting in restricted clusters.
+
 ## Development
 
 1. Ensure Go is installed and `nvml.h`/driver libraries are available locally.
-2. Run `go test ./...` (no tests are currently included, but this primes module
-   downloads).
-3. Build with `go build ./...` and run the exporter on a GPU-capable machine.
+2. Run `go test ./...` to verify parsing logic and prime module downloads.
+3. Build with `go build ./...` and run the exporter on a GPU-capable machine or
+   a container with the NVIDIA runtime enabled.
 
-The project uses Go modules and has no other build dependencies. Contributions
-are welcome—please keep newly added features documented in
-[`docs/metrics.md`](docs/metrics.md) so users know how to consume the data.
+The project uses Go modules only; no vendored dependencies are required.
+Contributions are welcome—please keep newly added metrics documented in
+[`docs/metrics.md`](docs/metrics.md) so users know how to consume the data, and
+update `k8s/daemonset.yaml` if new mounts or privileges are needed.
+
+## Troubleshooting
+
+- NVML init failures: ensure the host has NVIDIA drivers loaded and the process
+  can read `/dev/nvidia*`. Containers must run with the NVIDIA runtime.
+- Missing metrics: GB200 NVLink fields are only emitted on hardware that
+  reports the matching field IDs; unsupported fields are omitted rather than
+  zeroed.
+- No Xid updates: Xid counters depend on NVML event delivery. Check dmesg/driver
+  logs for GPU errors and make sure the exporter has permission to subscribe to
+  NVML events.
