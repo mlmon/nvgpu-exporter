@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,17 +30,17 @@ var (
 	}
 )
 
-func collectClockEventReasons(devices []nvml.Device) {
+func collectClockEventReasons(devices []nvml.Device, logger *slog.Logger) {
 	for _, device := range devices {
 		uuid, ret := device.GetUUID()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get UUID for device: %v", nvml.ErrorString(ret))
+			logger.Warn("failed to get UUID for device", "error", nvml.ErrorString(ret))
 			continue
 		}
 
 		pciInfo, ret := device.GetPciInfo()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get PCI info for device %s: %v", uuid, nvml.ErrorString(ret))
+			logger.Warn("failed to get PCI info", "uuid", uuid, "error", nvml.ErrorString(ret))
 			continue
 		}
 		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
@@ -50,7 +50,7 @@ func collectClockEventReasons(devices []nvml.Device) {
 		ret = device.GetFieldValues(fieldValues)
 		if !errors.Is(ret, nvml.SUCCESS) {
 			if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-				log.Printf("Failed to get clock event fields for device %s: %v", uuid, nvml.ErrorString(ret))
+				logger.Warn("failed to get clock event fields", "uuid", uuid, "error", nvml.ErrorString(ret))
 			}
 			continue
 		}
@@ -59,14 +59,14 @@ func collectClockEventReasons(devices []nvml.Device) {
 			fv := fieldValues[index[field.fieldID]]
 			if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
 				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
-					log.Printf("Clock event field %s unavailable for device %s: %v", field.reason, uuid, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
+					logger.Warn("clock event field unavailable", "reason", field.reason, "uuid", uuid, "error", nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 				}
 				continue
 			}
 
 			durationNanoseconds, err := clockEventFieldValueToNanoseconds(fv)
 			if err != nil {
-				log.Printf("Failed to decode clock event field %s for device %s: %v", field.reason, uuid, err)
+				logger.Warn("failed to decode clock event field", "reason", field.reason, "uuid", uuid, "error", err)
 				continue
 			}
 

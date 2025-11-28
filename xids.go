@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -21,7 +21,7 @@ var (
 )
 
 // startXidEventCollector starts a goroutine that subscribes to NVML events and collects Xid errors
-func startXidEventCollector(devices []nvml.Device) error {
+func startXidEventCollector(devices []nvml.Device, logger *slog.Logger) error {
 	// Register the Xid errors metric
 	prometheus.MustRegister(xidErrors)
 
@@ -36,14 +36,14 @@ func startXidEventCollector(devices []nvml.Device) error {
 	for _, device := range devices {
 		ret = nvml.DeviceRegisterEvents(device, eventTypes, eventSet)
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Warning: failed to register events for device: %v", nvml.ErrorString(ret))
+			logger.Warn("failed to register Xid events", "error", nvml.ErrorString(ret))
 			continue
 		}
 	}
 
 	// Start event collection goroutine
 	go func() {
-		log.Println("Started Xid event collector")
+		logger.Info("started Xid event collector")
 		for {
 			// Wait for events (timeout in milliseconds)
 			event, ret := nvml.EventSetWait(eventSet, 5000)
@@ -52,13 +52,13 @@ func startXidEventCollector(devices []nvml.Device) error {
 				continue
 			}
 			if !errors.Is(ret, nvml.SUCCESS) {
-				log.Printf("Error waiting for events: %v", nvml.ErrorString(ret))
+				logger.Warn("error waiting for NVML events", "error", nvml.ErrorString(ret))
 				continue
 			}
 
 			// Process the event if it's an Xid error
 			if event.EventType&nvml.EventTypeXidCriticalError != 0 {
-				handleXidEvent(event)
+				handleXidEvent(event, logger)
 			}
 		}
 	}()
@@ -67,19 +67,19 @@ func startXidEventCollector(devices []nvml.Device) error {
 }
 
 // handleXidEvent processes a Xid event and increments the appropriate counter
-func handleXidEvent(event nvml.EventData) {
+func handleXidEvent(event nvml.EventData, logger *slog.Logger) {
 
 	// Get device UUID
 	uuid, ret := event.Device.GetUUID()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		log.Printf("Failed to get UUID for device in Xid event: %v", nvml.ErrorString(ret))
+		logger.Warn("failed to get UUID for device in Xid event", "error", nvml.ErrorString(ret))
 		return
 	}
 
 	// Get PCI bus ID
 	pciInfo, ret := event.Device.GetPciInfo()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		log.Printf("Failed to get PCI info for device in Xid event: %v", nvml.ErrorString(ret))
+		logger.Warn("failed to get PCI info for device in Xid event", "error", nvml.ErrorString(ret))
 		return
 	}
 	pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
@@ -89,7 +89,7 @@ func handleXidEvent(event nvml.EventData) {
 	// Increment Prometheus counter
 	xidErrors.WithLabelValues(uuid, pciBusId, formatXid(xid)).Inc()
 
-	log.Printf("Xid error detected - UUID: %s, PCI Bus ID: %s, Xid: %d", uuid, pciBusId, xid)
+	logger.Warn("Xid error detected", "uuid", uuid, "pci_bus_id", pciBusId, "xid", xid)
 }
 
 // formatXid converts the Xid to a string for use in labels

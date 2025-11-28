@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -53,16 +53,17 @@ type DeviceLister interface {
 	ExporterInfo() (*ExporterInfo, error)
 }
 
-func logDeviceList(devices DeviceLister) {
-	log.Printf("Found %d GPU device(s)\n", devices.Count())
+func logDeviceList(devices DeviceLister, logger *slog.Logger) {
+	logger.Info("discovered GPUs", "count", devices.Count())
 
 	for i := 0; i < devices.Count(); i++ {
 		info, err := devices.GpuInfo(i)
 		if err != nil {
-			log.Fatalf("failed to get GPU info: %v", err)
+			logger.Error("failed to get GPU info", "index", i, "err", err)
+			continue
 		}
 
-		log.Printf("Device %d: %s (UUID: %s)\n", i, info.Name, info.UUID)
+		logger.Info("gpu", "index", i, "name", info.Name, "uuid", info.UUID)
 	}
 }
 
@@ -146,8 +147,7 @@ func initGpuInfoWithCache(infos []*GpuInfo) error {
 }
 
 // startCollectors starts a goroutine that periodically collects fabric health and NVLink error metrics
-func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) {
-	// Register the metrics
+func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo, logger *slog.Logger) {
 	prometheus.MustRegister(fabricHealth)
 	prometheus.MustRegister(fabricState)
 	prometheus.MustRegister(fabricStatus)
@@ -155,28 +155,21 @@ func startCollectors(devices Devices, interval time.Duration, infos []*GpuInfo) 
 	prometheus.MustRegister(fabricIncorrectConfig)
 	prometheus.MustRegister(nvlinkErrors)
 	prometheus.MustRegister(clockEventDurations)
-	//prometheus.MustRegister(gpuTopology)
-	// prometheus.MustRegister(nicTopology)
 
-	// Start the collection goroutine
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		// Collect immediately on start
-		collectFabricHealth(devices)
-		collectNVLinkErrors(devices)
-		collectClockEventReasons(devices)
-		// collectTopologyMetrics(devices)
+		collectFabricHealth(devices, logger)
+		collectNVLinkErrors(devices, logger)
+		collectClockEventReasons(devices, logger)
 
-		// Then collect periodically
 		for range ticker.C {
-			collectFabricHealth(devices)
-			collectNVLinkErrors(devices)
-			collectClockEventReasons(devices)
-			// collectTopologyMetrics(devices)
+			collectFabricHealth(devices, logger)
+			collectNVLinkErrors(devices, logger)
+			collectClockEventReasons(devices, logger)
 		}
 	}()
 
-	log.Printf("Started collectors with interval of %v", interval)
+	logger.Info("started collectors", "interval", interval)
 }

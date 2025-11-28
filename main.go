@@ -2,7 +2,8 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
+	"os"
 	"time"
 
 	_ "go.uber.org/automaxprocs"
@@ -22,14 +23,17 @@ func main() {
 	collectionInterval := flag.Duration("collection-interval", 60*time.Second, "Interval for collecting GPU fabric health metrics")
 	flag.Parse()
 
-	devices, shutdown, err := New()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	devices, shutdown, err := New(logger)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to initialize NVML", "err", err)
+		os.Exit(1)
 	}
 	defer shutdown()
 
-	err = Run(addr, collectionInterval, devices)
-	if err != nil {
-		log.Fatal(err)
+	if err := Run(addr, collectionInterval, devices, logger); err != nil {
+		logger.Error("exporter terminated", "err", err)
+		os.Exit(1)
 	}
 }

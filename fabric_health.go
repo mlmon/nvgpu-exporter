@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -57,18 +57,18 @@ var (
 )
 
 // collectFabricHealth collects GPU fabric health metrics for all devices
-func collectFabricHealth(devices []nvml.Device) {
+func collectFabricHealth(devices []nvml.Device, logger *slog.Logger) {
 	for _, device := range devices {
 		uuid, ret := device.GetUUID()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get UUID for device: %v", nvml.ErrorString(ret))
+			logger.Warn("failed to get UUID for device", "error", nvml.ErrorString(ret))
 			continue
 		}
 
 		// Get PCI bus ID
 		pciInfo, ret := device.GetPciInfo()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get PCI info for device %s: %v", uuid, nvml.ErrorString(ret))
+			logger.Warn("failed to get PCI info", "uuid", uuid, "error", nvml.ErrorString(ret))
 			continue
 		}
 		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
@@ -76,7 +76,7 @@ func collectFabricHealth(devices []nvml.Device) {
 		// Get GPU fabric info - try V2 which includes health mask
 		fabricInfo, ret := device.GetGpuFabricInfoV().V2()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get fabric info V2 for device %s: %v", uuid, nvml.ErrorString(ret))
+			logger.Warn("failed to get fabric info", "uuid", uuid, "error", nvml.ErrorString(ret))
 			continue
 		}
 

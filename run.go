@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -10,8 +10,8 @@ import (
 )
 
 // Run initializes metrics, starts collectors, and exposes the Prometheus HTTP handler.
-func Run(addr *string, collectionInterval *time.Duration, devices Devices) error {
-	log.Printf("Starting fabric health collector %v-%v\n", version, commit)
+func Run(addr *string, collectionInterval *time.Duration, devices Devices, logger *slog.Logger) error {
+	logger.Info("starting nvgpu collector", "version", version, "commit", commit)
 
 	gpuInfos, err := loadGpuInfos(devices)
 	if err != nil {
@@ -27,18 +27,18 @@ func Run(addr *string, collectionInterval *time.Duration, devices Devices) error
 	}
 
 	// Start fabric health collector
-	startCollectors(devices, *collectionInterval, gpuInfos)
+	startCollectors(devices, *collectionInterval, gpuInfos, logger)
 
 	// Start Xid event collector
-	if err := startXidEventCollector(devices); err != nil {
+	if err := startXidEventCollector(devices, logger); err != nil {
 		return fmt.Errorf("failed to start xid event collector: %w", err)
 	}
 
-	logDeviceList(devices)
+	logDeviceList(devices, logger)
 
 	http.Handle("/metrics", promhttp.Handler())
 
-	log.Printf("Starting server on %s", *addr)
+	logger.Info("starting HTTP server", "addr", *addr)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}

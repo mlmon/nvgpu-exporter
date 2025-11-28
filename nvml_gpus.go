@@ -4,21 +4,30 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
 
-func shutdown() {
+var nvmlLogger = slog.Default()
+
+func setNvmlLogger(logger *slog.Logger) {
+	if logger != nil {
+		nvmlLogger = logger
+	}
+}
+
+func shutdown(logger *slog.Logger) {
 	ret := nvml.Shutdown()
 	if !errors.Is(ret, nvml.SUCCESS) {
-		log.Fatalf("Failed to shutdown NVML: %v", nvml.ErrorString(ret))
+		logger.Error("failed to shutdown NVML", "error", nvml.ErrorString(ret))
 	}
 }
 
 // New initializes the NVML library, discovers every GPU device, and returns the
 // handles alongside a cleanup routine that must be called on shutdown.
-func New() (Devices, func(), error) {
+func New(logger *slog.Logger) (Devices, func(), error) {
+	setNvmlLogger(logger)
 	ret := nvml.Init()
 	if !errors.Is(ret, nvml.SUCCESS) {
 		return nil, nil, fmt.Errorf("failed to init NVML: %v", nvml.ErrorString(ret))
@@ -39,7 +48,7 @@ func New() (Devices, func(), error) {
 		}
 		devices = append(devices, device)
 	}
-	return devices, shutdown, nil
+	return devices, func() { shutdown(logger) }, nil
 }
 
 // Devices is a thin slice wrapper that provides helper methods for NVML queries.
@@ -167,7 +176,7 @@ func (d Devices) GpuInfo(i int) (*GpuInfo, error) {
 
 	powerVersion, ret := device.GetInforomVersion(nvml.INFOROM_POWER)
 	if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-		log.Println("Power InfoROM not supported on this GPU; skipping power metrics")
+		nvmlLogger.Warn("Power InfoROM not supported on this GPU; skipping power metrics", "index", i)
 	} else if !errors.Is(ret, nvml.SUCCESS) {
 		return nil, fmt.Errorf("failed to get Power InfoROM version: %v %v", nvml.ErrorString(ret), ret)
 	}
@@ -204,7 +213,7 @@ func (d Devices) GpuInfo(i int) (*GpuInfo, error) {
 		info.ComputeSlotIndex = "unsupported"
 		info.NodeIndex = "unsupported"
 	} else if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-		log.Printf("Failed to get platform info: %v", nvml.ErrorString(ret))
+		nvmlLogger.Warn("Failed to get platform info", "error", nvml.ErrorString(ret))
 	}
 
 	// Get GPU Fabric Info for GUID

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -99,18 +99,18 @@ var (
 )
 
 // collectNVLinkErrors collects NVLink error counters for all devices using Field Values API (GB200 compatible)
-func collectNVLinkErrors(devices []nvml.Device) {
+func collectNVLinkErrors(devices []nvml.Device, logger *slog.Logger) {
 	for _, device := range devices {
 		uuid, ret := device.GetUUID()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get UUID for device: %v", nvml.ErrorString(ret))
+			logger.Warn("failed to get UUID for device", "error", nvml.ErrorString(ret))
 			continue
 		}
 
 		// Get PCI bus ID
 		pciInfo, ret := device.GetPciInfo()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			log.Printf("Failed to get PCI info for device %s: %v", uuid, nvml.ErrorString(ret))
+			logger.Warn("failed to get PCI info", "uuid", uuid, "error", nvml.ErrorString(ret))
 			continue
 		}
 		pciBusId := pciBusIdToString(pciInfo.BusIdLegacy)
@@ -123,14 +123,13 @@ func collectNVLinkErrors(devices []nvml.Device) {
 		ret = device.GetFieldValues(fieldValues)
 		if !errors.Is(ret, nvml.SUCCESS) {
 			if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
-				log.Printf("Failed to get NVLink fields for device %s: %v",
-					uuid, nvml.ErrorString(ret))
+				logger.Warn("failed to read NVLink field values", "uuid", uuid, "error", nvml.ErrorString(ret))
 			}
 			continue
 		}
 
 		for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
-			if !linkActive(device, uuid, link) {
+			if !linkActive(device, uuid, link, logger) {
 				continue
 			}
 
@@ -138,7 +137,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 				fv := fieldValues[index[nvlinkFieldKey{fieldId: field.fieldId, link: link}]]
 				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
 					if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
-						log.Printf("Field %s not available for device %s link %d: %v", field.name, uuid, link, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
+						logger.Warn("NVLink field not available", "field", field.name, "uuid", uuid, "link", link, "error", nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 					}
 					continue
 				}
@@ -158,7 +157,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 				fv := fieldValues[index[nvlinkFieldKey{fieldId: field.fieldId, link: link}]]
 				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
 					if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
-						log.Printf("BER field %s not available for device %s link %d: %v", field.name, uuid, link, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
+						logger.Warn("BER field not available", "field", field.name, "uuid", uuid, "link", link, "error", nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 					}
 					continue
 				}
@@ -178,7 +177,7 @@ func collectNVLinkErrors(devices []nvml.Device) {
 				fv := fieldValues[index[nvlinkFieldKey{fieldId: field.fieldId, link: link}]]
 				if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.SUCCESS) {
 					if !errors.Is(nvml.Return(fv.NvmlReturn), nvml.ERROR_NOT_SUPPORTED) {
-						log.Printf("FEC field %s not available for device %s link %d: %v", field.name, uuid, link, nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
+						logger.Warn("FEC field not available", "field", field.name, "uuid", uuid, "link", link, "error", nvml.ErrorString(nvml.Return(fv.NvmlReturn)))
 					}
 					continue
 				}
@@ -201,17 +200,17 @@ type nvlinkFieldKey struct {
 	link    int
 }
 
-func linkActive(device nvml.Device, uuid string, link int) bool {
+func linkActive(device nvml.Device, uuid string, link int, logger *slog.Logger) bool {
 	state, ret := device.GetNvLinkState(link)
 	if !errors.Is(ret, nvml.SUCCESS) {
 		if !errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) && !errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
-			log.Printf("Failed to get NVLink state for device %s link %d: %v", uuid, link, nvml.ErrorString(ret))
+			logger.Warn("failed to get NVLink state", "uuid", uuid, "link", link, "error", nvml.ErrorString(ret))
 		}
 		return false
 	}
 
 	if state != nvml.FEATURE_ENABLED {
-		log.Printf("NVLink state for device %s link %d is not enabled", uuid, link)
+		logger.Debug("NVLink state not enabled", "uuid", uuid, "link", link)
 		return false
 	}
 
